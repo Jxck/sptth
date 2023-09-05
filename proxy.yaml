@@ -1,0 +1,15 @@
+sptth:
+  hosts:
+    alice.example:
+      key: ./cert/alice.example-key.pem
+      cert: ./cert/alice.example.pem
+      url: http://127.0.0.1:3000
+    bob.example:
+      key: ./cert/bob.example-key.pem
+      cert: ./cert/bob.example.pem
+      url: http://127.0.0.1:4000
+  config:
+    ssl:
+      port: 443
+    bunyan:
+      level: "warn"

@@ -1,0 +1,24 @@
+{
+  "name": "sptth",
+  "version": "0.0.0",
+  "author": "Jxck",
+  "license": "MIT",
+  "description": "reverse https proxy (https <-> sptth)",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node sptth.js proxy.yaml",
+    "cert": "./cert/mkcert.sh",
+    "fmt": "prettier --write ."
+  },
+  "bin": {
+    "sptth": "./sptth.js"
+  },
+  "dependencies": {
+    "redbird": "^0.10.0",
+    "yaml": "^2.3.2"
+  },
+  "devDependencies": {
+    "prettier": "^3.0.3"
+  }
+}
