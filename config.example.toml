@@ -1,14 +1,15 @@
+[dns]
 listen = "127.0.0.1:53"
 upstream = ["1.1.1.1:53", "8.8.8.8:53"]
-ttl_seconds = 30
+ttl_seconds = 1
 log_level = "info"
 
 [[record]]
-domain = "jxck.io"
+domain = "example.com"
 A = ["127.0.0.1"]
 AAAA = ["::1"]
 
 [[record]]
-domain = "api.jxck.io"
+domain = "example.net"
 A = ["127.0.0.2"]
 AAAA = ["::1"]
