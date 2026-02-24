@@ -1,11 +1,12 @@
 # sptth
 
-Step 1: DNS only.
+`sptth` currently provides:
 
-This implementation does only name resolution:
+1. DNS server with local overrides (`[[record]]`)
+2. Plain HTTP reverse proxy on port `443` (`[[proxy]]`)
 
-- returns configured local addresses for configured domains
-- forwards all other queries to upstream DNS servers
+This phase does not support TLS yet. Access is plain HTTP, for example:
+`http://example.com:443`.
 
 ## Config (TOML)
 
@@ -21,21 +22,28 @@ log_level = "info"
 [[record]]
 domain = "example.com"
 A = ["127.0.0.1"]
-AAAA = ["::1"]
 
 [[record]]
 domain = "example.net"
 A = ["127.0.0.2"]
-AAAA = ["::1"]
+
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "localhost:3000"
+
+[[proxy]]
+domain = "example.net"
+listen = "127.0.0.1:443"
+upstream = "localhost:3001"
 ```
 
-Each `[[record]]` can define `A` and/or `AAAA`.
+## Config Notes
 
-`[dns].log_level` values:
-
-- `error`
-- `info` (default)
-- `debug`
+- `[[record]]`: each entry can define `A` and/or `AAAA`.
+- `[[proxy]].upstream`: must be `host:port` only (no `http://` or `https://`).
+- In this MVP, all `[[proxy]].listen` values must be identical.
+- `[[proxy]].domain` must be unique.
 
 ## Build
 
@@ -51,21 +59,28 @@ sudo env RUSTUP_TOOLCHAIN=1.92.0-aarch64-apple-darwin cargo run -- config.toml
 
 If omitted, `config.toml` in the current directory is used.
 
-## Verify
+## Verify DNS
 
 ```sh
 dig @127.0.0.1 example.com A
+dig @127.0.0.1 example.net A
 ```
+
+## Verify Proxy (Plain HTTP on 443)
+
+Start an upstream app first:
 
 ```sh
-dig @127.0.0.1 example.net AAAA
+python3 -m http.server 3000
 ```
+
+Then call the proxy:
 
 ```sh
-dig @127.0.0.1 example.com A
+curl --resolve example.com:443:127.0.0.1 http://example.com:443/
 ```
 
-Expected:
+Expected behavior:
 
-- configured domains resolve to addresses from `[[record]]` (`A` / `AAAA`)
-- other domains are resolved by upstream DNS
+- `Host: example.com` is routed to `localhost:3000`
+- unknown host returns `502 Bad Gateway`

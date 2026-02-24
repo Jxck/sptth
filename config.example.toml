@@ -13,3 +13,13 @@ AAAA = ["::1"]
 domain = "example.net"
 A = ["127.0.0.2"]
 AAAA = ["::1"]
+
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "localhost:3000"
+
+[[proxy]]
+domain = "example.net"
+listen = "127.0.0.1:443"
+upstream = "localhost:3001"

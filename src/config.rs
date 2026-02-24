@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use http::uri::Authority;
 use serde::Deserialize;
 
 use crate::logging::LogLevel;
@@ -14,6 +15,7 @@ use crate::logging::LogLevel;
 struct RawConfig {
     dns: RawDns,
     record: Vec<RawRecord>,
+    proxy: Vec<RawProxy>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,17 +35,44 @@ struct RawRecord {
     aaaa: Option<Vec<String>>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Deserialize)]
+struct RawProxy {
+    domain: String,
+    listen: String,
+    upstream: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct DomainAddrs {
     pub ipv4: Vec<Ipv4Addr>,
     pub ipv6: Vec<Ipv6Addr>,
 }
 
-pub struct AppConfig {
+#[derive(Debug)]
+pub struct DnsConfig {
     pub listen: SocketAddr,
     pub upstream: Vec<SocketAddr>,
-    pub records: HashMap<String, DomainAddrs>,
     pub ttl_seconds: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProxyConfig {
+    pub domain: String,
+    pub listen: SocketAddr,
+    pub upstream_host_port: String,
+}
+
+impl ProxyConfig {
+    pub fn base_url(&self) -> String {
+        format!("http://{}", self.upstream_host_port)
+    }
+}
+
+#[derive(Debug)]
+pub struct AppConfig {
+    pub dns: DnsConfig,
+    pub records: HashMap<String, DomainAddrs>,
+    pub proxies: Vec<ProxyConfig>,
     pub log_level: LogLevel,
 }
 
@@ -51,24 +80,28 @@ impl AppConfig {
     pub fn from_file(path: &Path) -> Result<Self> {
         let raw = fs::read_to_string(path)
             .with_context(|| format!("failed to read config file: {}", path.display()))?;
-        let parsed: RawConfig = toml::from_str(&raw)
-            .with_context(|| format!("failed to parse TOML: {}", path.display()))?;
+        Self::from_toml_str(&raw, &path.display().to_string())
+    }
 
-        let listen = parsed
+    fn from_toml_str(raw: &str, source: &str) -> Result<Self> {
+        let parsed: RawConfig =
+            toml::from_str(raw).with_context(|| format!("failed to parse TOML: {}", source))?;
+
+        let dns_listen = parsed
             .dns
             .listen
             .parse::<SocketAddr>()
-            .with_context(|| format!("invalid listen address: {}", parsed.dns.listen))?;
+            .with_context(|| format!("invalid dns.listen address: {}", parsed.dns.listen))?;
 
         if parsed.dns.upstream.is_empty() {
-            bail!("upstream must have at least one dns server");
+            bail!("dns.upstream must have at least one dns server");
         }
 
-        let mut upstream = Vec::with_capacity(parsed.dns.upstream.len());
+        let mut dns_upstream = Vec::with_capacity(parsed.dns.upstream.len());
         for u in &parsed.dns.upstream {
-            upstream.push(
+            dns_upstream.push(
                 u.parse::<SocketAddr>()
-                    .with_context(|| format!("invalid upstream address: {u}"))?,
+                    .with_context(|| format!("invalid dns.upstream address: {u}"))?,
             );
         }
 
@@ -118,11 +151,58 @@ impl AppConfig {
             }
         }
 
+        if parsed.proxy.is_empty() {
+            bail!("at least one [[proxy]] is required");
+        }
+
+        let mut proxies = Vec::<ProxyConfig>::with_capacity(parsed.proxy.len());
+        let mut domain_seen = HashMap::<String, ()>::new();
+        let mut listen_seen = None::<SocketAddr>;
+
+        for row in &parsed.proxy {
+            let domain = normalize_domain(&row.domain);
+            if domain.is_empty() {
+                bail!("proxy.domain contains empty value");
+            }
+            if domain_seen.insert(domain.clone(), ()).is_some() {
+                bail!("duplicate proxy.domain: {}", domain);
+            }
+
+            let listen = row
+                .listen
+                .parse::<SocketAddr>()
+                .with_context(|| format!("invalid proxy.listen address: {}", row.listen))?;
+
+            match listen_seen {
+                None => listen_seen = Some(listen),
+                Some(v) if v == listen => {}
+                Some(_) => bail!("all proxy.listen values must be identical in this phase"),
+            }
+
+            if row.upstream.contains("://") {
+                bail!(
+                    "proxy.upstream must be host:port (no scheme): {}",
+                    row.upstream
+                );
+            }
+
+            validate_upstream_host_port(&row.upstream)?;
+
+            proxies.push(ProxyConfig {
+                domain,
+                listen,
+                upstream_host_port: row.upstream.clone(),
+            });
+        }
+
         Ok(Self {
-            listen,
-            upstream,
+            dns: DnsConfig {
+                listen: dns_listen,
+                upstream: dns_upstream,
+                ttl_seconds: parsed.dns.ttl_seconds.unwrap_or(30),
+            },
             records,
-            ttl_seconds: parsed.dns.ttl_seconds.unwrap_or(30),
+            proxies,
             log_level: match parsed.dns.log_level.as_deref() {
                 None => LogLevel::Info,
                 Some(v) => LogLevel::parse(v)?,
@@ -136,6 +216,16 @@ impl AppConfig {
         v.join(", ")
     }
 
+    pub fn joined_proxies(&self) -> String {
+        self.proxies
+            .iter()
+            .map(|p| format!("{}:{}->{}", p.domain, p.listen.port(), p.upstream_host_port))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+impl DnsConfig {
     pub fn joined_upstream(&self) -> String {
         self.upstream
             .iter()
@@ -147,4 +237,112 @@ impl AppConfig {
 
 pub fn normalize_domain(input: &str) -> String {
     input.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn validate_upstream_host_port(input: &str) -> Result<()> {
+    let authority: Authority = input
+        .parse()
+        .with_context(|| format!("invalid proxy.upstream host:port: {}", input))?;
+
+    if authority.host().is_empty() {
+        bail!("proxy.upstream host is empty: {}", input);
+    }
+
+    if authority.port_u16().is_none() {
+        bail!("proxy.upstream must include port: {}", input);
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppConfig;
+
+    fn base_toml(proxy_block: &str) -> String {
+        format!(
+            r#"
+[dns]
+listen = "127.0.0.1:53"
+upstream = ["1.1.1.1:53"]
+ttl_seconds = 1
+log_level = "info"
+
+[[record]]
+domain = "example.com"
+A = ["127.0.0.1"]
+
+{proxy_block}
+"#
+        )
+    }
+
+    #[test]
+    fn reject_proxy_upstream_with_scheme() {
+        let toml = base_toml(
+            r#"
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "http://localhost:3000"
+"#,
+        );
+
+        let err = AppConfig::from_toml_str(&toml, "test")
+            .expect_err("config should fail for scheme in upstream");
+        assert!(err.to_string().contains("no scheme"));
+    }
+
+    #[test]
+    fn reject_proxy_upstream_without_port() {
+        let toml = base_toml(
+            r#"
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "localhost"
+"#,
+        );
+
+        let err =
+            AppConfig::from_toml_str(&toml, "test").expect_err("config should fail without port");
+        assert!(err.to_string().contains("must include port"));
+    }
+
+    #[test]
+    fn reject_duplicate_proxy_domain() {
+        let toml = base_toml(
+            r#"
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "localhost:3000"
+
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "localhost:3001"
+"#,
+        );
+
+        let err = AppConfig::from_toml_str(&toml, "test")
+            .expect_err("config should fail for duplicate domain");
+        assert!(err.to_string().contains("duplicate proxy.domain"));
+    }
+
+    #[test]
+    fn reject_invalid_proxy_listen() {
+        let toml = base_toml(
+            r#"
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1"
+upstream = "localhost:3000"
+"#,
+        );
+
+        let err = AppConfig::from_toml_str(&toml, "test")
+            .expect_err("config should fail for invalid listen");
+        assert!(err.to_string().contains("invalid proxy.listen"));
+    }
 }

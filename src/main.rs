@@ -1,6 +1,7 @@
 mod config;
 mod dns;
 mod logging;
+mod proxy;
 mod server;
 
 use std::{env, path::PathBuf};
@@ -15,11 +16,12 @@ async fn main() -> Result<()> {
 
     logging::init(config.log_level);
 
-    println!("sptth dns started");
-    println!("  config  : {}", config_path.display());
-    println!("  listen  : {}", config.listen);
-    println!("  records : {}", config.joined_domains());
-    println!("  upstream: {}", config.joined_upstream());
+    println!("sptth started");
+    println!("  config   : {}", config_path.display());
+    println!("  dns      : {}", config.dns.listen);
+    println!("  records  : {}", config.joined_domains());
+    println!("  upstream : {}", config.dns.joined_upstream());
+    println!("  proxies  : {}", config.joined_proxies());
     println!("  log_level: {}", config.log_level.as_str());
     println!("press Ctrl+C to stop");
 
