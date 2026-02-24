@@ -253,7 +253,7 @@ impl AppConfig {
             dns: DnsConfig {
                 listen: dns_listen,
                 upstream: dns_upstream,
-                ttl_seconds: parsed.dns.ttl_seconds.unwrap_or(30),
+                ttl_seconds: parsed.dns.ttl_seconds.unwrap_or(1),
             },
             tls: TlsConfig {
                 enabled: tls_enabled,
