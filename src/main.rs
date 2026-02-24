@@ -1,0 +1,217 @@
+use std::{
+    collections::HashSet,
+    env, fs,
+    net::{Ipv4Addr, SocketAddr},
+    path::PathBuf,
+    sync::Arc,
+};
+
+use anyhow::{Context, Result, anyhow, bail};
+use hickory_proto::{
+    op::{Message, MessageType, Query, ResponseCode},
+    rr::{Name, RData, Record, RecordType, rdata::A},
+};
+use serde::Deserialize;
+use tokio::{net::UdpSocket, signal, task, time};
+
+#[derive(Debug, Deserialize)]
+struct RawConfig {
+    listen: String,
+    upstream: Vec<String>,
+    domains: Vec<String>,
+    ttl_seconds: Option<u32>,
+}
+
+struct Config {
+    listen: SocketAddr,
+    upstream: Vec<SocketAddr>,
+    domains: HashSet<String>,
+    ttl_seconds: u32,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let config_path = parse_cli_args()?;
+    let config = load_config(&config_path)?;
+
+    println!("sptth dns started");
+    println!("  config  : {}", config_path.display());
+    println!("  listen  : {}", config.listen);
+    println!("  domains : {}", join_domains(&config.domains));
+    println!("  upstream: {}", join_upstream(&config.upstream));
+    println!("press Ctrl+C to stop");
+
+    run_dns_server(config).await
+}
+
+fn parse_cli_args() -> Result<PathBuf> {
+    let mut args = env::args();
+    let bin = args.next().unwrap_or_else(|| "sptth".to_string());
+
+    let config_path = match args.next() {
+        Some(v) => PathBuf::from(v),
+        None => PathBuf::from("config.toml"),
+    };
+
+    if args.next().is_some() {
+        bail!("usage: {} [config.toml]", bin);
+    }
+
+    Ok(config_path)
+}
+
+fn load_config(path: &PathBuf) -> Result<Config> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read config file: {}", path.display()))?;
+    let parsed: RawConfig = toml::from_str(&raw)
+        .with_context(|| format!("failed to parse TOML: {}", path.display()))?;
+
+    let listen = parsed
+        .listen
+        .parse::<SocketAddr>()
+        .with_context(|| format!("invalid listen address: {}", parsed.listen))?;
+
+    if parsed.upstream.is_empty() {
+        bail!("upstream must have at least one dns server");
+    }
+
+    let mut upstream = Vec::with_capacity(parsed.upstream.len());
+    for u in &parsed.upstream {
+        upstream.push(
+            u.parse::<SocketAddr>()
+                .with_context(|| format!("invalid upstream address: {u}"))?,
+        );
+    }
+
+    if parsed.domains.is_empty() {
+        bail!("domains must have at least one domain name");
+    }
+
+    let domains = parsed
+        .domains
+        .iter()
+        .map(|d| normalize_domain(d))
+        .collect::<HashSet<_>>();
+
+    if domains.contains("") {
+        bail!("domains contains empty value");
+    }
+
+    Ok(Config {
+        listen,
+        upstream,
+        domains,
+        ttl_seconds: parsed.ttl_seconds.unwrap_or(30),
+    })
+}
+
+async fn run_dns_server(config: Config) -> Result<()> {
+    let socket = Arc::new(
+        UdpSocket::bind(config.listen)
+            .await
+            .with_context(|| format!("failed to bind dns socket {}", config.listen))?,
+    );
+    let domains = Arc::new(config.domains);
+    let upstream = Arc::new(config.upstream);
+    let ttl = config.ttl_seconds;
+
+    let mut buf = vec![0_u8; 4096];
+    loop {
+        tokio::select! {
+            _ = signal::ctrl_c() => break,
+            recv = socket.recv_from(&mut buf) => {
+                let (size, peer) = recv.context("dns recv_from failed")?;
+                let req_packet = buf[..size].to_vec();
+                let socket = Arc::clone(&socket);
+                let domains = Arc::clone(&domains);
+                let upstream = Arc::clone(&upstream);
+
+                task::spawn(async move {
+                    if let Ok(resp) = handle_dns_packet(&req_packet, domains.as_ref(), upstream.as_ref(), ttl).await {
+                        let _ = socket.send_to(&resp, peer).await;
+                    }
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_dns_packet(
+    packet: &[u8],
+    domains: &HashSet<String>,
+    upstream: &[SocketAddr],
+    ttl: u32,
+) -> Result<Vec<u8>> {
+    let req = Message::from_vec(packet).context("invalid dns request packet")?;
+    let query = req
+        .queries()
+        .first()
+        .ok_or_else(|| anyhow!("dns query is empty"))?
+        .clone();
+
+    let qname = normalize_domain(&query.name().to_ascii());
+    let qtype = query.query_type();
+    if domains.contains(&qname) && (qtype == RecordType::A || qtype.is_any()) {
+        return local_a_response(&req, &query, &qname, ttl);
+    }
+
+    forward_dns_packet(packet, upstream).await
+}
+
+fn local_a_response(req: &Message, query: &Query, qname: &str, ttl: u32) -> Result<Vec<u8>> {
+    let mut resp = Message::new();
+    resp.set_id(req.id());
+    resp.set_message_type(MessageType::Response);
+    resp.set_op_code(req.op_code());
+    resp.set_recursion_desired(req.recursion_desired());
+    resp.set_recursion_available(true);
+    resp.set_authoritative(true);
+    resp.set_response_code(ResponseCode::NoError);
+    resp.add_query(query.clone());
+
+    let name = Name::from_ascii(qname).with_context(|| format!("invalid query name: {qname}"))?;
+    let record = Record::from_rdata(name, ttl, RData::A(A(Ipv4Addr::new(127, 0, 0, 1))));
+    resp.add_answer(record);
+
+    resp.to_vec().context("failed to encode dns response")
+}
+
+async fn forward_dns_packet(packet: &[u8], upstream: &[SocketAddr]) -> Result<Vec<u8>> {
+    for server in upstream {
+        let resolver = UdpSocket::bind("0.0.0.0:0")
+            .await
+            .context("failed to bind temporary dns socket")?;
+        resolver
+            .send_to(packet, server)
+            .await
+            .with_context(|| format!("failed to forward dns query to {server}"))?;
+
+        let mut buf = vec![0_u8; 4096];
+        let recv = time::timeout(time::Duration::from_secs(2), resolver.recv_from(&mut buf)).await;
+        if let Ok(Ok((n, _))) = recv {
+            return Ok(buf[..n].to_vec());
+        }
+    }
+
+    bail!("all upstream dns servers failed")
+}
+
+fn normalize_domain(input: &str) -> String {
+    input.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn join_domains(domains: &HashSet<String>) -> String {
+    let mut v = domains.iter().cloned().collect::<Vec<_>>();
+    v.sort();
+    v.join(", ")
+}
+
+fn join_upstream(upstream: &[SocketAddr]) -> String {
+    upstream
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}

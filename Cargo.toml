@@ -1,0 +1,11 @@
+[package]
+name = "sptth"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+hickory-proto = "0.25"
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+toml = "0.9"
