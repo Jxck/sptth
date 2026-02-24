@@ -9,7 +9,7 @@ AAAA = ["::1"]
 
 [[record]]
 domain = "example.net"
-A = ["127.0.0.2"]
+A = ["127.0.0.1"]
 AAAA = ["::1"]
 
 [tls]
@@ -24,4 +24,4 @@ upstream = "localhost:3000"
 [[proxy]]
 domain = "example.net"
 listen = "127.0.0.1:443"
-upstream = "localhost:3001"
+upstream = "localhost:4000"
