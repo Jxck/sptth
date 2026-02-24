@@ -1,16 +1,19 @@
 use std::{
     collections::HashSet,
     env, fs,
-    net::{Ipv4Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
-    sync::Arc,
+    sync::{Arc, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
 use hickory_proto::{
     op::{Message, MessageType, Query, ResponseCode},
-    rr::{Name, RData, Record, RecordType, rdata::A},
+    rr::{
+        Name, RData, Record, RecordType,
+        rdata::{A, AAAA},
+    },
 };
 use serde::Deserialize;
 use tokio::{net::UdpSocket, signal, task, time};
@@ -30,9 +33,19 @@ struct Config {
     ttl_seconds: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum LogLevel {
+    Error,
+    Info,
+    Debug,
+}
+
+static LOG_LEVEL: OnceLock<LogLevel> = OnceLock::new();
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let config_path = parse_cli_args()?;
+    let (config_path, log_level) = parse_cli_args()?;
+    let _ = LOG_LEVEL.set(log_level);
     let config = load_config(&config_path)?;
 
     println!("sptth dns started");
@@ -40,26 +53,51 @@ async fn main() -> Result<()> {
     println!("  listen  : {}", config.listen);
     println!("  domains : {}", join_domains(&config.domains));
     println!("  upstream: {}", join_upstream(&config.upstream));
+    println!("  log_level: {}", log_level.as_str());
     println!("press Ctrl+C to stop");
     log_info("dns server loop starting");
 
     run_dns_server(config).await
 }
 
-fn parse_cli_args() -> Result<PathBuf> {
+fn parse_cli_args() -> Result<(PathBuf, LogLevel)> {
     let mut args = env::args();
     let bin = args.next().unwrap_or_else(|| "sptth".to_string());
+    let mut config_path = PathBuf::from("config.toml");
+    let mut config_set = false;
+    let mut log_level = LogLevel::Info;
 
-    let config_path = match args.next() {
-        Some(v) => PathBuf::from(v),
-        None => PathBuf::from("config.toml"),
-    };
-
-    if args.next().is_some() {
-        bail!("usage: {} [config.toml]", bin);
+    let argv = args.collect::<Vec<_>>();
+    let mut i = 0_usize;
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "--help" | "-h" => {
+                print_usage(&bin);
+                std::process::exit(0);
+            }
+            "--log-level" => {
+                i += 1;
+                let value = argv
+                    .get(i)
+                    .ok_or_else(|| anyhow!("--log-level requires a value"))?;
+                log_level = LogLevel::parse(value)?;
+            }
+            arg if arg.starts_with('-') => bail!("unknown option: {}", arg),
+            path => {
+                if config_set {
+                    bail!(
+                        "usage: {} [config.toml] [--log-level <error|info|debug>]",
+                        bin
+                    );
+                }
+                config_path = PathBuf::from(path);
+                config_set = true;
+            }
+        }
+        i += 1;
     }
 
-    Ok(config_path)
+    Ok((config_path, log_level))
 }
 
 fn load_config(path: &PathBuf) -> Result<Config> {
@@ -125,6 +163,7 @@ async fn run_dns_server(config: Config) -> Result<()> {
                 let (size, peer) = recv.context("dns recv_from failed")?;
                 let req_packet = buf[..size].to_vec();
                 log_debug(&format!("recv {} bytes from {}", size, peer));
+
                 let socket = Arc::clone(&socket);
                 let domains = Arc::clone(&domains);
                 let upstream = Arc::clone(&upstream);
@@ -171,13 +210,15 @@ async fn handle_dns_packet(
         qtype
     ));
 
-    if domains.contains(&qname) && (qtype == RecordType::A || qtype.is_any()) {
+    if domains.contains(&qname)
+        && (qtype == RecordType::A || qtype == RecordType::AAAA || qtype.is_any())
+    {
         log_info(&format!(
-            "local resolve id={} name={} -> 127.0.0.1",
+            "local resolve id={} name={} -> localhost",
             req.id(),
             qname
         ));
-        return local_a_response(&req, &query, &qname, ttl);
+        return local_response(&req, &query, &qname, qtype, ttl);
     }
 
     log_debug(&format!(
@@ -188,7 +229,13 @@ async fn handle_dns_packet(
     forward_dns_packet(packet, req.id(), &qname, qtype, upstream).await
 }
 
-fn local_a_response(req: &Message, query: &Query, qname: &str, ttl: u32) -> Result<Vec<u8>> {
+fn local_response(
+    req: &Message,
+    query: &Query,
+    qname: &str,
+    qtype: RecordType,
+    ttl: u32,
+) -> Result<Vec<u8>> {
     let mut resp = Message::new();
     resp.set_id(req.id());
     resp.set_message_type(MessageType::Response);
@@ -200,8 +247,23 @@ fn local_a_response(req: &Message, query: &Query, qname: &str, ttl: u32) -> Resu
     resp.add_query(query.clone());
 
     let name = Name::from_ascii(qname).with_context(|| format!("invalid query name: {qname}"))?;
-    let record = Record::from_rdata(name, ttl, RData::A(A(Ipv4Addr::new(127, 0, 0, 1))));
-    resp.add_answer(record);
+    match qtype {
+        RecordType::AAAA => {
+            let record = Record::from_rdata(name, ttl, RData::AAAA(AAAA(Ipv6Addr::LOCALHOST)));
+            resp.add_answer(record);
+        }
+        RecordType::ANY => {
+            let record_a =
+                Record::from_rdata(name.clone(), ttl, RData::A(A(Ipv4Addr::new(127, 0, 0, 1))));
+            let record_aaaa = Record::from_rdata(name, ttl, RData::AAAA(AAAA(Ipv6Addr::LOCALHOST)));
+            resp.add_answer(record_a);
+            resp.add_answer(record_aaaa);
+        }
+        _ => {
+            let record = Record::from_rdata(name, ttl, RData::A(A(Ipv4Addr::new(127, 0, 0, 1))));
+            resp.add_answer(record);
+        }
+    }
 
     resp.to_vec().context("failed to encode dns response")
 }
@@ -273,15 +335,26 @@ fn join_upstream(upstream: &[SocketAddr]) -> String {
 }
 
 fn log_info(msg: &str) {
-    eprintln!("[{}] INFO  {}", unix_ts(), msg);
+    if should_log(LogLevel::Info) {
+        eprintln!("[{}] INFO  {}", unix_ts(), msg);
+    }
 }
 
 fn log_debug(msg: &str) {
-    eprintln!("[{}] DEBUG {}", unix_ts(), msg);
+    if should_log(LogLevel::Debug) {
+        eprintln!("[{}] DEBUG {}", unix_ts(), msg);
+    }
 }
 
 fn log_error(msg: &str) {
-    eprintln!("[{}] ERROR {}", unix_ts(), msg);
+    if should_log(LogLevel::Error) {
+        eprintln!("[{}] ERROR {}", unix_ts(), msg);
+    }
+}
+
+fn should_log(level: LogLevel) -> bool {
+    let configured = LOG_LEVEL.get().copied().unwrap_or(LogLevel::Info);
+    level <= configured
 }
 
 fn unix_ts() -> u64 {
@@ -289,4 +362,33 @@ fn unix_ts() -> u64 {
         Ok(dur) => dur.as_secs(),
         Err(_) => 0,
     }
+}
+
+impl LogLevel {
+    fn parse(v: &str) -> Result<Self> {
+        match v {
+            "error" => Ok(Self::Error),
+            "info" => Ok(Self::Info),
+            "debug" => Ok(Self::Debug),
+            _ => bail!(
+                "invalid --log-level value: {} (expected: error|info|debug)",
+                v
+            ),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Info => "info",
+            Self::Debug => "debug",
+        }
+    }
+}
+
+fn print_usage(bin: &str) {
+    println!(
+        "usage: {} [config.toml] [--log-level <error|info|debug>]",
+        bin
+    );
 }

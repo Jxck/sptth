@@ -6,7 +6,6 @@ This implementation does only name resolution:
 
 - returns `A=127.0.0.1` for configured domains
 - forwards all other queries to upstream DNS servers
-- prints detailed DNS logs (receive, local resolve, forward attempts, timeout/errors)
 
 ## Config (TOML)
 
@@ -28,10 +27,16 @@ cargo build
 ## Run
 
 ```sh
-sudo env RUSTUP_TOOLCHAIN=1.92.0-aarch64-apple-darwin cargo run -- config.toml
+sudo env RUSTUP_TOOLCHAIN=1.92.0-aarch64-apple-darwin cargo run -- config.toml --log-level info
 ```
 
 If omitted, `config.toml` in the current directory is used.
+
+## Log Levels
+
+- `--log-level error`: errors only
+- `--log-level info`: errors + local resolve events (default)
+- `--log-level debug`: include query receive/forward details
 
 ## Verify
 
