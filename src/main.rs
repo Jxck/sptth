@@ -23,6 +23,7 @@ struct RawConfig {
     listen: String,
     upstream: Vec<String>,
     ttl_seconds: Option<u32>,
+    log_level: Option<String>,
     record: Vec<RawRecord>,
 }
 
@@ -46,6 +47,7 @@ struct Config {
     upstream: Vec<SocketAddr>,
     records: HashMap<String, DomainAddrs>,
     ttl_seconds: u32,
+    log_level: LogLevel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -59,60 +61,35 @@ static LOG_LEVEL: OnceLock<LogLevel> = OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let (config_path, log_level) = parse_cli_args()?;
-    let _ = LOG_LEVEL.set(log_level);
+    let config_path = parse_cli_args()?;
     let config = load_config(&config_path)?;
+    let _ = LOG_LEVEL.set(config.log_level);
 
     println!("sptth dns started");
     println!("  config  : {}", config_path.display());
     println!("  listen  : {}", config.listen);
     println!("  records : {}", join_domains(config.records.keys()));
     println!("  upstream: {}", join_upstream(&config.upstream));
-    println!("  log_level: {}", log_level.as_str());
+    println!("  log_level: {}", config.log_level.as_str());
     println!("press Ctrl+C to stop");
     log_info("dns server loop starting");
 
     run_dns_server(config).await
 }
 
-fn parse_cli_args() -> Result<(PathBuf, LogLevel)> {
+fn parse_cli_args() -> Result<PathBuf> {
     let mut args = env::args();
     let bin = args.next().unwrap_or_else(|| "sptth".to_string());
-    let mut config_path = PathBuf::from("config.toml");
-    let mut config_set = false;
-    let mut log_level = LogLevel::Info;
+    let config_path = args
+        .next()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("config.toml"));
 
-    let argv = args.collect::<Vec<_>>();
-    let mut i = 0_usize;
-    while i < argv.len() {
-        match argv[i].as_str() {
-            "--help" | "-h" => {
-                print_usage(&bin);
-                std::process::exit(0);
-            }
-            "--log-level" => {
-                i += 1;
-                let value = argv
-                    .get(i)
-                    .ok_or_else(|| anyhow!("--log-level requires a value"))?;
-                log_level = LogLevel::parse(value)?;
-            }
-            arg if arg.starts_with('-') => bail!("unknown option: {}", arg),
-            path => {
-                if config_set {
-                    bail!(
-                        "usage: {} [config.toml] [--log-level <error|info|debug>]",
-                        bin
-                    );
-                }
-                config_path = PathBuf::from(path);
-                config_set = true;
-            }
-        }
-        i += 1;
+    if args.next().is_some() {
+        bail!("usage: {} [config.toml]", bin);
     }
 
-    Ok((config_path, log_level))
+    Ok(config_path)
 }
 
 fn load_config(path: &PathBuf) -> Result<Config> {
@@ -189,6 +166,10 @@ fn load_config(path: &PathBuf) -> Result<Config> {
         upstream,
         records,
         ttl_seconds: parsed.ttl_seconds.unwrap_or(30),
+        log_level: match parsed.log_level.as_deref() {
+            None => LogLevel::Info,
+            Some(v) => LogLevel::parse(v)?,
+        },
     })
 }
 
@@ -436,7 +417,7 @@ impl LogLevel {
             "info" => Ok(Self::Info),
             "debug" => Ok(Self::Debug),
             _ => bail!(
-                "invalid --log-level value: {} (expected: error|info|debug)",
+                "invalid log_level value: {} (expected: error|info|debug)",
                 v
             ),
         }
@@ -449,11 +430,4 @@ impl LogLevel {
             Self::Debug => "debug",
         }
     }
-}
-
-fn print_usage(bin: &str) {
-    println!(
-        "usage: {} [config.toml] [--log-level <error|info|debug>]",
-        bin
-    );
 }
