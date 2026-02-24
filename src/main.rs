@@ -1,7 +1,7 @@
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     env, fs,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     sync::{Arc, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
@@ -22,14 +22,29 @@ use tokio::{net::UdpSocket, signal, task, time};
 struct RawConfig {
     listen: String,
     upstream: Vec<String>,
-    domains: Vec<String>,
     ttl_seconds: Option<u32>,
+    record: Vec<RawRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRecord {
+    domain: String,
+    #[serde(rename = "A")]
+    a: Option<Vec<String>>,
+    #[serde(rename = "AAAA")]
+    aaaa: Option<Vec<String>>,
+}
+
+#[derive(Clone)]
+struct DomainAddrs {
+    ipv4: Vec<Ipv4Addr>,
+    ipv6: Vec<Ipv6Addr>,
 }
 
 struct Config {
     listen: SocketAddr,
     upstream: Vec<SocketAddr>,
-    domains: HashSet<String>,
+    records: HashMap<String, DomainAddrs>,
     ttl_seconds: u32,
 }
 
@@ -51,7 +66,7 @@ async fn main() -> Result<()> {
     println!("sptth dns started");
     println!("  config  : {}", config_path.display());
     println!("  listen  : {}", config.listen);
-    println!("  domains : {}", join_domains(&config.domains));
+    println!("  records : {}", join_domains(config.records.keys()));
     println!("  upstream: {}", join_upstream(&config.upstream));
     println!("  log_level: {}", log_level.as_str());
     println!("press Ctrl+C to stop");
@@ -123,24 +138,56 @@ fn load_config(path: &PathBuf) -> Result<Config> {
         );
     }
 
-    if parsed.domains.is_empty() {
-        bail!("domains must have at least one domain name");
+    if parsed.record.is_empty() {
+        bail!("at least one [[record]] is required");
     }
 
-    let domains = parsed
-        .domains
-        .iter()
-        .map(|d| normalize_domain(d))
-        .collect::<HashSet<_>>();
+    let mut records = HashMap::<String, DomainAddrs>::new();
+    for row in &parsed.record {
+        let domain = normalize_domain(&row.domain);
+        if domain.is_empty() {
+            bail!("record.domain contains empty value");
+        }
 
-    if domains.contains("") {
-        bail!("domains contains empty value");
+        let a_values = row.a.as_deref().unwrap_or(&[]);
+        let aaaa_values = row.aaaa.as_deref().unwrap_or(&[]);
+        if a_values.is_empty() && aaaa_values.is_empty() {
+            bail!("record requires A and/or AAAA values: {}", domain);
+        }
+
+        let mut ipv4 = Vec::<Ipv4Addr>::new();
+        let mut ipv6 = Vec::<Ipv6Addr>::new();
+
+        for value in a_values {
+            let ip = value
+                .parse::<IpAddr>()
+                .with_context(|| format!("invalid A address in record {}: {}", domain, value))?;
+            match ip {
+                IpAddr::V4(v4) => ipv4.push(v4),
+                IpAddr::V6(_) => bail!("A must be IPv4 in record {}: {}", domain, value),
+            }
+        }
+
+        for value in aaaa_values {
+            let ip = value
+                .parse::<IpAddr>()
+                .with_context(|| format!("invalid AAAA address in record {}: {}", domain, value))?;
+            match ip {
+                IpAddr::V6(v6) => ipv6.push(v6),
+                IpAddr::V4(_) => bail!("AAAA must be IPv6 in record {}: {}", domain, value),
+            }
+        }
+
+        let prev = records.insert(domain.clone(), DomainAddrs { ipv4, ipv6 });
+        if prev.is_some() {
+            bail!("duplicate record.domain: {}", domain);
+        }
     }
 
     Ok(Config {
         listen,
         upstream,
-        domains,
+        records,
         ttl_seconds: parsed.ttl_seconds.unwrap_or(30),
     })
 }
@@ -151,7 +198,7 @@ async fn run_dns_server(config: Config) -> Result<()> {
             .await
             .with_context(|| format!("failed to bind dns socket {}", config.listen))?,
     );
-    let domains = Arc::new(config.domains);
+    let records = Arc::new(config.records);
     let upstream = Arc::new(config.upstream);
     let ttl = config.ttl_seconds;
 
@@ -165,11 +212,11 @@ async fn run_dns_server(config: Config) -> Result<()> {
                 log_debug(&format!("recv {} bytes from {}", size, peer));
 
                 let socket = Arc::clone(&socket);
-                let domains = Arc::clone(&domains);
+                let records = Arc::clone(&records);
                 let upstream = Arc::clone(&upstream);
 
                 task::spawn(async move {
-                    match handle_dns_packet(&req_packet, peer, domains.as_ref(), upstream.as_ref(), ttl).await {
+                    match handle_dns_packet(&req_packet, peer, records.as_ref(), upstream.as_ref(), ttl).await {
                         Ok(resp) => {
                             match socket.send_to(&resp, peer).await {
                                 Ok(sent) => log_debug(&format!("sent {} bytes to {}", sent, peer)),
@@ -189,7 +236,7 @@ async fn run_dns_server(config: Config) -> Result<()> {
 async fn handle_dns_packet(
     packet: &[u8],
     peer: SocketAddr,
-    domains: &HashSet<String>,
+    records: &HashMap<String, DomainAddrs>,
     upstream: &[SocketAddr],
     ttl: u32,
 ) -> Result<Vec<u8>> {
@@ -210,15 +257,16 @@ async fn handle_dns_packet(
         qtype
     ));
 
-    if domains.contains(&qname)
-        && (qtype == RecordType::A || qtype == RecordType::AAAA || qtype.is_any())
-    {
-        log_info(&format!(
-            "local resolve id={} name={} -> localhost",
-            req.id(),
-            qname
-        ));
-        return local_response(&req, &query, &qname, qtype, ttl);
+    if let Some(addrs) = records.get(&qname) {
+        if qtype == RecordType::A || qtype == RecordType::AAAA || qtype.is_any() {
+            log_info(&format!(
+                "local resolve id={} name={} type={}",
+                req.id(),
+                qname,
+                qtype
+            ));
+            return local_response(&req, &query, &qname, qtype, ttl, addrs);
+        }
     }
 
     log_debug(&format!(
@@ -235,6 +283,7 @@ fn local_response(
     qname: &str,
     qtype: RecordType,
     ttl: u32,
+    addrs: &DomainAddrs,
 ) -> Result<Vec<u8>> {
     let mut resp = Message::new();
     resp.set_id(req.id());
@@ -247,22 +296,35 @@ fn local_response(
     resp.add_query(query.clone());
 
     let name = Name::from_ascii(qname).with_context(|| format!("invalid query name: {qname}"))?;
+
     match qtype {
+        RecordType::A => {
+            for v4 in &addrs.ipv4 {
+                resp.add_answer(Record::from_rdata(name.clone(), ttl, RData::A(A(*v4))));
+            }
+        }
         RecordType::AAAA => {
-            let record = Record::from_rdata(name, ttl, RData::AAAA(AAAA(Ipv6Addr::LOCALHOST)));
-            resp.add_answer(record);
+            for v6 in &addrs.ipv6 {
+                resp.add_answer(Record::from_rdata(
+                    name.clone(),
+                    ttl,
+                    RData::AAAA(AAAA(*v6)),
+                ));
+            }
         }
         RecordType::ANY => {
-            let record_a =
-                Record::from_rdata(name.clone(), ttl, RData::A(A(Ipv4Addr::new(127, 0, 0, 1))));
-            let record_aaaa = Record::from_rdata(name, ttl, RData::AAAA(AAAA(Ipv6Addr::LOCALHOST)));
-            resp.add_answer(record_a);
-            resp.add_answer(record_aaaa);
+            for v4 in &addrs.ipv4 {
+                resp.add_answer(Record::from_rdata(name.clone(), ttl, RData::A(A(*v4))));
+            }
+            for v6 in &addrs.ipv6 {
+                resp.add_answer(Record::from_rdata(
+                    name.clone(),
+                    ttl,
+                    RData::AAAA(AAAA(*v6)),
+                ));
+            }
         }
-        _ => {
-            let record = Record::from_rdata(name, ttl, RData::A(A(Ipv4Addr::new(127, 0, 0, 1))));
-            resp.add_answer(record);
-        }
+        _ => {}
     }
 
     resp.to_vec().context("failed to encode dns response")
@@ -320,8 +382,11 @@ fn normalize_domain(input: &str) -> String {
     input.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
-fn join_domains(domains: &HashSet<String>) -> String {
-    let mut v = domains.iter().cloned().collect::<Vec<_>>();
+fn join_domains<'a, I>(domains: I) -> String
+where
+    I: Iterator<Item = &'a String>,
+{
+    let mut v = domains.cloned().collect::<Vec<_>>();
     v.sort();
     v.join(", ")
 }

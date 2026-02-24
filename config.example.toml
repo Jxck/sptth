@@ -1,4 +1,13 @@
 listen = "127.0.0.1:53"
 upstream = ["1.1.1.1:53", "8.8.8.8:53"]
-domains = ["jxck.io", "api.jxck.io"]
 ttl_seconds = 30
+
+[[record]]
+domain = "jxck.io"
+A = ["127.0.0.1"]
+AAAA = ["::1"]
+
+[[record]]
+domain = "api.jxck.io"
+A = ["127.0.0.2"]
+AAAA = ["::1"]
