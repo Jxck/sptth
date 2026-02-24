@@ -6,12 +6,13 @@ Current capabilities:
 
 1. DNS override for configured domains (`[[record]]`)
 2. HTTPS reverse proxy on `127.0.0.1:443` (`[[proxy]]`)
-3. Local CA creation and macOS trust-store installation (automatic at startup)
+3. Local CA creation and OS trust-store installation (automatic at startup)
 
 ## Current Platform Support
 
 - macOS: supported
-- Linux / Windows: planned (not implemented yet)
+- Linux: supported (`update-ca-certificates` or `update-ca-trust`)
+- Windows: supported (`certutil`)
 
 ## Config (TOML)
 
@@ -20,13 +21,13 @@ Current capabilities:
 listen = "127.0.0.1:53"
 upstream = ["1.1.1.1:53", "8.8.8.8:53"]
 
-[tls]
-ca_dir = "~/.config/sptth/ca"
-cert_dir = "~/.config/sptth/certs"
-
 [[record]]
 domain = "example.com"
 A = ["127.0.0.1"]
+
+[tls]
+ca_dir = "~/.config/sptth/ca"
+cert_dir = "~/.config/sptth/certs"
 
 [[proxy]]
 domain = "example.com"
@@ -40,6 +41,8 @@ upstream = "localhost:3000"
 - `[[proxy]].domain` must be unique.
 - all `[[proxy]].listen` values must be identical in this phase.
 - startup fails if CA trust installation fails.
+- Linux requires either `update-ca-certificates` or `update-ca-trust`.
+- Windows requires `certutil`.
 
 ## Defaults
 
