@@ -6,6 +6,7 @@ This implementation does only name resolution:
 
 - returns `A=127.0.0.1` for configured domains
 - forwards all other queries to upstream DNS servers
+- prints detailed DNS logs (receive, local resolve, forward attempts, timeout/errors)
 
 ## Config (TOML)
 

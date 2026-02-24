@@ -4,6 +4,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -40,6 +41,7 @@ async fn main() -> Result<()> {
     println!("  domains : {}", join_domains(&config.domains));
     println!("  upstream: {}", join_upstream(&config.upstream));
     println!("press Ctrl+C to stop");
+    log_info("dns server loop starting");
 
     run_dns_server(config).await
 }
@@ -122,13 +124,20 @@ async fn run_dns_server(config: Config) -> Result<()> {
             recv = socket.recv_from(&mut buf) => {
                 let (size, peer) = recv.context("dns recv_from failed")?;
                 let req_packet = buf[..size].to_vec();
+                log_debug(&format!("recv {} bytes from {}", size, peer));
                 let socket = Arc::clone(&socket);
                 let domains = Arc::clone(&domains);
                 let upstream = Arc::clone(&upstream);
 
                 task::spawn(async move {
-                    if let Ok(resp) = handle_dns_packet(&req_packet, domains.as_ref(), upstream.as_ref(), ttl).await {
-                        let _ = socket.send_to(&resp, peer).await;
+                    match handle_dns_packet(&req_packet, peer, domains.as_ref(), upstream.as_ref(), ttl).await {
+                        Ok(resp) => {
+                            match socket.send_to(&resp, peer).await {
+                                Ok(sent) => log_debug(&format!("sent {} bytes to {}", sent, peer)),
+                                Err(err) => log_error(&format!("failed to send response to {}: {}", peer, err)),
+                            }
+                        }
+                        Err(err) => log_error(&format!("request handling failed for {}: {}", peer, err)),
                     }
                 });
             }
@@ -140,6 +149,7 @@ async fn run_dns_server(config: Config) -> Result<()> {
 
 async fn handle_dns_packet(
     packet: &[u8],
+    peer: SocketAddr,
     domains: &HashSet<String>,
     upstream: &[SocketAddr],
     ttl: u32,
@@ -153,11 +163,29 @@ async fn handle_dns_packet(
 
     let qname = normalize_domain(&query.name().to_ascii());
     let qtype = query.query_type();
+    log_debug(&format!(
+        "query id={} from={} name={} type={}",
+        req.id(),
+        peer,
+        qname,
+        qtype
+    ));
+
     if domains.contains(&qname) && (qtype == RecordType::A || qtype.is_any()) {
+        log_info(&format!(
+            "local resolve id={} name={} -> 127.0.0.1",
+            req.id(),
+            qname
+        ));
         return local_a_response(&req, &query, &qname, ttl);
     }
 
-    forward_dns_packet(packet, upstream).await
+    log_debug(&format!(
+        "forward id={} name={} to upstream",
+        req.id(),
+        qname
+    ));
+    forward_dns_packet(packet, req.id(), &qname, qtype, upstream).await
 }
 
 fn local_a_response(req: &Message, query: &Query, qname: &str, ttl: u32) -> Result<Vec<u8>> {
@@ -178,8 +206,18 @@ fn local_a_response(req: &Message, query: &Query, qname: &str, ttl: u32) -> Resu
     resp.to_vec().context("failed to encode dns response")
 }
 
-async fn forward_dns_packet(packet: &[u8], upstream: &[SocketAddr]) -> Result<Vec<u8>> {
+async fn forward_dns_packet(
+    packet: &[u8],
+    query_id: u16,
+    qname: &str,
+    qtype: RecordType,
+    upstream: &[SocketAddr],
+) -> Result<Vec<u8>> {
     for server in upstream {
+        log_debug(&format!(
+            "forward try id={} name={} type={} upstream={}",
+            query_id, qname, qtype, server
+        ));
         let resolver = UdpSocket::bind("0.0.0.0:0")
             .await
             .context("failed to bind temporary dns socket")?;
@@ -190,8 +228,26 @@ async fn forward_dns_packet(packet: &[u8], upstream: &[SocketAddr]) -> Result<Ve
 
         let mut buf = vec![0_u8; 4096];
         let recv = time::timeout(time::Duration::from_secs(2), resolver.recv_from(&mut buf)).await;
-        if let Ok(Ok((n, _))) = recv {
-            return Ok(buf[..n].to_vec());
+        match recv {
+            Ok(Ok((n, from))) => {
+                log_debug(&format!(
+                    "forward success id={} upstream={} bytes={}",
+                    query_id, from, n
+                ));
+                return Ok(buf[..n].to_vec());
+            }
+            Ok(Err(err)) => {
+                log_error(&format!(
+                    "forward recv error id={} upstream={} err={}",
+                    query_id, server, err
+                ));
+            }
+            Err(_) => {
+                log_error(&format!(
+                    "forward timeout id={} upstream={}",
+                    query_id, server
+                ));
+            }
         }
     }
 
@@ -214,4 +270,23 @@ fn join_upstream(upstream: &[SocketAddr]) -> String {
         .map(|v| v.to_string())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn log_info(msg: &str) {
+    eprintln!("[{}] INFO  {}", unix_ts(), msg);
+}
+
+fn log_debug(msg: &str) {
+    eprintln!("[{}] DEBUG {}", unix_ts(), msg);
+}
+
+fn log_error(msg: &str) {
+    eprintln!("[{}] ERROR {}", unix_ts(), msg);
+}
+
+fn unix_ts() -> u64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(dur) => dur.as_secs(),
+        Err(_) => 0,
+    }
 }
