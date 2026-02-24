@@ -4,6 +4,14 @@ upstream = ["1.1.1.1:53", "8.8.8.8:53"]
 ttl_seconds = 1
 log_level = "info"
 
+[tls]
+enabled = true
+ca_dir = "/tmp/sptth/ca"
+cert_dir = "/tmp/sptth/certs"
+ca_common_name = "sptth local ca"
+valid_days = 90
+renew_before_days = 30
+
 [[record]]
 domain = "example.com"
 A = ["127.0.0.1"]

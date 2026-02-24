@@ -1,16 +1,22 @@
+mod ca;
 mod config;
 mod dns;
 mod logging;
+mod platform;
 mod proxy;
 mod server;
+mod tls;
 
 use std::{env, path::PathBuf};
 
 use anyhow::{Result, bail};
 use config::AppConfig;
+use rustls::crypto::ring::default_provider;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let _ = default_provider().install_default();
+
     let config_path = parse_cli_args()?;
     let config = AppConfig::from_file(&config_path)?;
 
@@ -22,6 +28,14 @@ async fn main() -> Result<()> {
     println!("  records  : {}", config.joined_domains());
     println!("  upstream : {}", config.dns.joined_upstream());
     println!("  proxies  : {}", config.joined_proxies());
+    println!(
+        "  tls      : {}",
+        if config.tls.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
     println!("  log_level: {}", config.log_level.as_str());
     println!("press Ctrl+C to stop");
 

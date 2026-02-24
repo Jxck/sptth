@@ -1,8 +1,8 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, bail};
@@ -14,6 +14,7 @@ use crate::logging::LogLevel;
 #[derive(Debug, Deserialize)]
 struct RawConfig {
     dns: RawDns,
+    tls: RawTls,
     record: Vec<RawRecord>,
     proxy: Vec<RawProxy>,
 }
@@ -24,6 +25,16 @@ struct RawDns {
     upstream: Vec<String>,
     ttl_seconds: Option<u32>,
     log_level: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawTls {
+    enabled: Option<bool>,
+    ca_dir: String,
+    cert_dir: String,
+    ca_common_name: Option<String>,
+    valid_days: Option<u32>,
+    renew_before_days: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +66,16 @@ pub struct DnsConfig {
     pub ttl_seconds: u32,
 }
 
+#[derive(Debug)]
+pub struct TlsConfig {
+    pub enabled: bool,
+    pub ca_dir: PathBuf,
+    pub cert_dir: PathBuf,
+    pub ca_common_name: String,
+    pub valid_days: u32,
+    pub renew_before_days: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct ProxyConfig {
     pub domain: String,
@@ -71,6 +92,7 @@ impl ProxyConfig {
 #[derive(Debug)]
 pub struct AppConfig {
     pub dns: DnsConfig,
+    pub tls: TlsConfig,
     pub records: HashMap<String, DomainAddrs>,
     pub proxies: Vec<ProxyConfig>,
     pub log_level: LogLevel,
@@ -103,6 +125,24 @@ impl AppConfig {
                 u.parse::<SocketAddr>()
                     .with_context(|| format!("invalid dns.upstream address: {u}"))?,
             );
+        }
+
+        let tls_enabled = parsed.tls.enabled.unwrap_or(true);
+        let tls_valid_days = parsed.tls.valid_days.unwrap_or(90);
+        let tls_renew_before_days = parsed.tls.renew_before_days.unwrap_or(30);
+        if tls_valid_days == 0 {
+            bail!("tls.valid_days must be greater than 0");
+        }
+        if tls_renew_before_days >= tls_valid_days {
+            bail!("tls.renew_before_days must be smaller than tls.valid_days");
+        }
+
+        let ca_common_name = parsed
+            .tls
+            .ca_common_name
+            .unwrap_or_else(|| "sptth local ca".to_string());
+        if ca_common_name.trim().is_empty() {
+            bail!("tls.ca_common_name must not be empty");
         }
 
         if parsed.record.is_empty() {
@@ -156,7 +196,7 @@ impl AppConfig {
         }
 
         let mut proxies = Vec::<ProxyConfig>::with_capacity(parsed.proxy.len());
-        let mut domain_seen = HashMap::<String, ()>::new();
+        let mut domain_seen = HashSet::<String>::new();
         let mut listen_seen = None::<SocketAddr>;
 
         for row in &parsed.proxy {
@@ -164,7 +204,7 @@ impl AppConfig {
             if domain.is_empty() {
                 bail!("proxy.domain contains empty value");
             }
-            if domain_seen.insert(domain.clone(), ()).is_some() {
+            if !domain_seen.insert(domain.clone()) {
                 bail!("duplicate proxy.domain: {}", domain);
             }
 
@@ -200,6 +240,14 @@ impl AppConfig {
                 listen: dns_listen,
                 upstream: dns_upstream,
                 ttl_seconds: parsed.dns.ttl_seconds.unwrap_or(30),
+            },
+            tls: TlsConfig {
+                enabled: tls_enabled,
+                ca_dir: PathBuf::from(parsed.tls.ca_dir),
+                cert_dir: PathBuf::from(parsed.tls.cert_dir),
+                ca_common_name,
+                valid_days: tls_valid_days,
+                renew_before_days: tls_renew_before_days,
             },
             records,
             proxies,
@@ -267,6 +315,14 @@ listen = "127.0.0.1:53"
 upstream = ["1.1.1.1:53"]
 ttl_seconds = 1
 log_level = "info"
+
+[tls]
+enabled = true
+ca_dir = "/tmp/sptth-ca"
+cert_dir = "/tmp/sptth-certs"
+ca_common_name = "sptth local ca"
+valid_days = 90
+renew_before_days = 30
 
 [[record]]
 domain = "example.com"
@@ -344,5 +400,22 @@ upstream = "localhost:3000"
         let err = AppConfig::from_toml_str(&toml, "test")
             .expect_err("config should fail for invalid listen");
         assert!(err.to_string().contains("invalid proxy.listen"));
+    }
+
+    #[test]
+    fn reject_invalid_tls_renew_window() {
+        let toml = base_toml(
+            r#"
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "localhost:3000"
+"#,
+        )
+        .replace("renew_before_days = 30", "renew_before_days = 90");
+
+        let err = AppConfig::from_toml_str(&toml, "test")
+            .expect_err("config should fail for invalid renew window");
+        assert!(err.to_string().contains("renew_before_days"));
     }
 }

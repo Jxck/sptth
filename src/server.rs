@@ -1,16 +1,25 @@
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use tokio::{net::UdpSocket, signal, task};
 
 use crate::{
+    ca,
     config::{AppConfig, DnsConfig, DomainAddrs},
-    dns, logging, proxy,
+    dns, logging, platform, proxy, tls,
 };
 
 pub async fn run(config: AppConfig) -> Result<()> {
+    if !config.tls.enabled {
+        bail!("tls.enabled must be true in this phase");
+    }
+
+    let assets = ca::provision_certificates(&config.tls, &config.proxies)?;
+    platform::install_ca_cert(&assets.ca_cert_path)?;
+    let tls_config = tls::build_server_config(&assets.certs)?;
+
     let dns_fut = run_dns(config.dns, config.records);
-    let proxy_fut = proxy::run(config.proxies);
+    let proxy_fut = proxy::run(config.proxies, Arc::clone(&tls_config));
 
     tokio::select! {
         res = async {

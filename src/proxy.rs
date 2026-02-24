@@ -9,6 +9,12 @@ use axum::{
     response::IntoResponse,
     routing::any,
 };
+use hyper::{body::Incoming, server::conn::http1, service::service_fn};
+use hyper_util::rt::TokioIo;
+use rustls::ServerConfig;
+use tokio::net::TcpListener;
+use tokio_rustls::TlsAcceptor;
+use tower::ServiceExt;
 
 use crate::{config::ProxyConfig, logging};
 
@@ -25,7 +31,7 @@ struct ProxyState {
     client: reqwest::Client,
 }
 
-pub async fn run(proxies: Vec<ProxyConfig>) -> Result<()> {
+pub async fn run(proxies: Vec<ProxyConfig>, tls_config: Arc<ServerConfig>) -> Result<()> {
     let listen = proxies
         .first()
         .map(|p| p.listen)
@@ -56,14 +62,48 @@ pub async fn run(proxies: Vec<ProxyConfig>) -> Result<()> {
         .route("/{*path}", any(proxy_handler))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(listen)
+    let listener = TcpListener::bind(listen)
         .await
         .with_context(|| format!("failed to bind proxy socket {}", listen))?;
+    let acceptor = TlsAcceptor::from(tls_config);
 
-    logging::info("PROXY", &format!("proxy listening on {}", listen));
-    axum::serve(listener, app)
-        .await
-        .context("proxy server failed")
+    logging::info("PROXY", &format!("https proxy listening on {}", listen));
+
+    loop {
+        let (stream, peer) = listener
+            .accept()
+            .await
+            .context("failed to accept proxy tcp connection")?;
+
+        let acceptor = acceptor.clone();
+        let app = app.clone();
+
+        tokio::spawn(async move {
+            let tls_stream = match acceptor.accept(stream).await {
+                Ok(v) => v,
+                Err(err) => {
+                    logging::error(
+                        "PROXY",
+                        &format!("tls handshake failed peer={} err={}", peer, err),
+                    );
+                    return;
+                }
+            };
+
+            let io = TokioIo::new(tls_stream);
+            let service = service_fn(move |req: Request<Incoming>| {
+                let app = app.clone();
+                async move { app.oneshot(req.map(Body::new)).await }
+            });
+
+            if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
+                logging::error(
+                    "PROXY",
+                    &format!("connection handling failed peer={} err={}", peer, err),
+                );
+            }
+        });
+    }
 }
 
 async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> impl IntoResponse {
