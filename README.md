@@ -19,14 +19,10 @@ Current capabilities:
 [dns]
 listen = "127.0.0.1:53"
 upstream = ["1.1.1.1:53", "8.8.8.8:53"]
-ttl_seconds = 1
-log_level = "info"
 
 [tls]
-enabled = true
-ca_common_name = "sptth local ca"
-valid_days = 90
-renew_before_days = 30
+ca_dir = "~/.config/sptth/ca"
+cert_dir = "~/.config/sptth/certs"
 
 [[record]]
 domain = "example.com"
@@ -44,9 +40,18 @@ upstream = "localhost:3000"
 - `[[proxy]].domain` must be unique.
 - all `[[proxy]].listen` values must be identical in this phase.
 - startup fails if CA trust installation fails.
-- `tls.ca_dir` and `tls.cert_dir` are optional.
-- default paths are `~/.config/sptth/ca` and `~/.config/sptth/certs`.
-- when started via `sudo`, the default uses `SUDO_USER` home.
+
+## Defaults
+
+- `[dns].ttl_seconds`: `30`
+- `[dns].log_level`: `info`
+- `[tls].enabled`: `true`
+- `[tls].ca_common_name`: `sptth local ca`
+- `[tls].valid_days`: `90`
+- `[tls].renew_before_days`: `30`
+- `[tls].ca_dir`: `~/.config/sptth/ca`
+- `[tls].cert_dir`: `~/.config/sptth/certs`
+- when started via `sudo`, default `tls.ca_dir` / `tls.cert_dir` use `SUDO_USER` home.
 - trust-store installation runs when CA is created. If CA already exists, it is skipped.
 
 ## Run
