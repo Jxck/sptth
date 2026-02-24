@@ -30,8 +30,8 @@ struct RawDns {
 #[derive(Debug, Deserialize)]
 struct RawTls {
     enabled: Option<bool>,
-    ca_dir: String,
-    cert_dir: String,
+    ca_dir: Option<String>,
+    cert_dir: Option<String>,
     ca_common_name: Option<String>,
     valid_days: Option<u32>,
     renew_before_days: Option<u32>,
@@ -145,6 +145,20 @@ impl AppConfig {
             bail!("tls.ca_common_name must not be empty");
         }
 
+        let default_base = default_state_base_dir();
+        let ca_dir = parsed
+            .tls
+            .ca_dir
+            .as_deref()
+            .map(expand_tilde)
+            .unwrap_or_else(|| default_base.join("ca"));
+        let cert_dir = parsed
+            .tls
+            .cert_dir
+            .as_deref()
+            .map(expand_tilde)
+            .unwrap_or_else(|| default_base.join("certs"));
+
         if parsed.record.is_empty() {
             bail!("at least one [[record]] is required");
         }
@@ -243,8 +257,8 @@ impl AppConfig {
             },
             tls: TlsConfig {
                 enabled: tls_enabled,
-                ca_dir: PathBuf::from(parsed.tls.ca_dir),
-                cert_dir: PathBuf::from(parsed.tls.cert_dir),
+                ca_dir,
+                cert_dir,
                 ca_common_name,
                 valid_days: tls_valid_days,
                 renew_before_days: tls_renew_before_days,
@@ -301,6 +315,36 @@ fn validate_upstream_host_port(input: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn default_state_base_dir() -> PathBuf {
+    if let Ok(sudo_user) = std::env::var("SUDO_USER") {
+        if !sudo_user.trim().is_empty() && sudo_user != "root" {
+            return PathBuf::from(format!("/Users/{}/.config/sptth", sudo_user));
+        }
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.trim().is_empty() {
+            return PathBuf::from(home).join(".config").join("sptth");
+        }
+    }
+
+    PathBuf::from(".sptth")
+}
+
+fn expand_tilde(input: &str) -> PathBuf {
+    if input == "~" {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home);
+        }
+    }
+    if let Some(suffix) = input.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home).join(suffix);
+        }
+    }
+    PathBuf::from(input)
 }
 
 #[cfg(test)]

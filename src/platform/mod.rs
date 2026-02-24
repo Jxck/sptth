@@ -14,6 +14,8 @@ pub fn install_ca_cert(ca_cert_path: &Path) -> Result<()> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = ca_cert_path;
-        anyhow::bail!("unsupported platform: trust-store auto-install currently supports only macOS");
+        anyhow::bail!(
+            "unsupported platform: trust-store auto-install currently supports only macOS"
+        );
     }
 }

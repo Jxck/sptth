@@ -15,7 +15,11 @@ pub async fn run(config: AppConfig) -> Result<()> {
     }
 
     let assets = ca::provision_certificates(&config.tls, &config.proxies)?;
-    platform::install_ca_cert(&assets.ca_cert_path)?;
+    if assets.ca_created {
+        platform::install_ca_cert(&assets.ca_cert_path)?;
+    } else {
+        logging::info("TLS", "ca exists, trust install skipped");
+    }
     let tls_config = tls::build_server_config(&assets.certs)?;
 
     let dns_fut = run_dns(config.dns, config.records);

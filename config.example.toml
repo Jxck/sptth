@@ -6,8 +6,10 @@ log_level = "info"
 
 [tls]
 enabled = true
-ca_dir = "/tmp/sptth/ca"
-cert_dir = "/tmp/sptth/certs"
+# optional; defaults to ~/.config/sptth/ca and ~/.config/sptth/certs
+# (when running with sudo, SUDO_USER home is used)
+# ca_dir = "/Users/you/.config/sptth/ca"
+# cert_dir = "/Users/you/.config/sptth/certs"
 ca_common_name = "sptth local ca"
 valid_days = 90
 renew_before_days = 30

@@ -26,6 +26,7 @@ pub struct IssuedCert {
 #[derive(Debug)]
 pub struct TlsAssets {
     pub ca_cert_path: PathBuf,
+    pub ca_created: bool,
     pub certs: HashMap<String, IssuedCert>,
 }
 
@@ -69,6 +70,7 @@ pub fn provision_certificates(tls: &TlsConfig, proxies: &[ProxyConfig]) -> Resul
 
     Ok(TlsAssets {
         ca_cert_path: signer.ca_cert_path,
+        ca_created: signer.created,
         certs,
     })
 }
@@ -77,18 +79,22 @@ struct CaSigner {
     ca_cert: Certificate,
     ca_key: KeyPair,
     ca_cert_path: PathBuf,
+    created: bool,
 }
 
 fn load_or_create_ca(tls: &TlsConfig) -> Result<CaSigner> {
     let ca_cert_path = tls.ca_dir.join("rootCA.pem");
     let ca_key_path = tls.ca_dir.join("rootCA-key.pem");
 
-    let (ca_key, created) = if ca_key_path.exists() {
+    let key_exists = ca_key_path.exists();
+    let cert_exists = ca_cert_path.exists();
+
+    let (ca_key, created) = if key_exists {
         let pem = fs::read_to_string(&ca_key_path)
             .with_context(|| format!("failed to read CA key: {}", ca_key_path.display()))?;
         let key = KeyPair::from_pem(&pem)
             .with_context(|| format!("failed to parse CA key: {}", ca_key_path.display()))?;
-        (key, false)
+        (key, !cert_exists)
     } else {
         let key = KeyPair::generate().context("failed to generate CA key")?;
         fs::write(&ca_key_path, key.serialize_pem())
@@ -111,8 +117,11 @@ fn load_or_create_ca(tls: &TlsConfig) -> Result<CaSigner> {
         .self_signed(&ca_key)
         .context("failed to create CA certificate")?;
 
-    fs::write(&ca_cert_path, ca_cert.pem())
-        .with_context(|| format!("failed to write CA certificate: {}", ca_cert_path.display()))?;
+    if created {
+        fs::write(&ca_cert_path, ca_cert.pem()).with_context(|| {
+            format!("failed to write CA certificate: {}", ca_cert_path.display())
+        })?;
+    }
 
     if created {
         logging::info(
@@ -127,6 +136,7 @@ fn load_or_create_ca(tls: &TlsConfig) -> Result<CaSigner> {
         ca_cert,
         ca_key,
         ca_cert_path,
+        created,
     })
 }
 
