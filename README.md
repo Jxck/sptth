@@ -1,5 +1,9 @@
 # sptth
 
+<p align="center">
+  <img src="docs/assets/logo-horizontal.svg" alt="sptth logo" width="900" />
+</p>
+
 All-in-one tool for local server development with **valid HTTPS**.
 
 ## Concept
@@ -30,7 +34,7 @@ Change your OS DNS server to `127.0.0.1`.
 
 `System Settings > Network > Wi-Fi Details > DNS > DNS Servers`
 
-![DNS Settings on macOS](dns-settings-on-macos.png)
+![DNS Settings on macOS](docs/assets/dns-settings-on-macos.png)
 
 ### Windows
 
