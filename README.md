@@ -5,7 +5,7 @@ All-in-one tool for local server development with **valid HTTPS**.
 ## Concept
 
 Do you usually develop with URLs like `http://localhost:3000`?
-`localhost` is special hostname and behaves differently from production, so things that work locally can fail after deployment on `https://${your-production-domain}`.
+`localhost` is a special hostname and behaves differently from production, so things that work locally can fail after deployment on `https://${your-production-domain}`.
 
 `sptth` bundles everything needed to develop locally on real domains such as `https://${your-production-domain}`.
 
@@ -13,17 +13,18 @@ Do you usually develop with URLs like `http://localhost:3000`?
 - Local CA
 - Local reverse proxy
 
-You can start all of them with one `sudo` command and test in conditions closer to production locally.
+You can start all of them with one `sudo` command and test locally in conditions closer to production.
 
 ## Caution
 
-> [!CAUTION] > `sptth` is in **Early Preview** during `v0.x`.
+> [!CAUTION]
+> `sptth` is in **Early Preview** during `v0.x`.
 > It changes some of your local settings.
 > Use it at your own risk.
 
 ## Quick Start
 
-Change your OS DNS setting to `127.0.0.1:53`.
+Change your OS DNS server to `127.0.0.1`.
 
 ### macOS
 
@@ -49,7 +50,7 @@ TODO: add binary release installation steps.
 sudo sptth config.toml
 ```
 
-It requires changes to Local Certificate Store, please accept it (at your own risk).
+It requires installing a local CA into the OS trust store. Please accept it (at your own risk).
 
 ## `config.toml`
 
@@ -83,14 +84,14 @@ listen = "127.0.0.1:443"
 upstream = "localhost:4000"
 ```
 
-In this example, access to domains are proxied to local servers.
+In this example, access to these domains is proxied to local servers.
 
 - `https://example.com` -> `http://localhost:3000`
 - `https://example.net` -> `http://localhost:4000`
 
-This works because DNS overrides `example.com`, `example.net` to `127.0.0.1`, the proxy forwards `example.com:443` to `127.0.0.1:3000`, `example.net:443` to `127.0.0.1:4000`.
+This works because the local DNS resolves `example.com` and `example.net` to `127.0.0.1`, and the proxy forwards HTTPS on port 443 to the upstream HTTP servers.
 
-The browser should not show certificate errors. Since it uses valid TLS Certs issued by Local CA trusted by System.
+The browser should not show certificate errors, because valid TLS certificates are issued by a local CA trusted by the OS.
 
 ## Current Platform Support
 
@@ -153,7 +154,7 @@ Files are stored in `cert_dir` and used by the proxy to provide valid TLS in bro
 - `[tls].cert_dir`
   - Domain certificate/key directory (default: `~/.config/sptth/certs`)
 
-(Default `tls.ca_dir` / `tls.cert_dir` are resolved using `SUDO_USER` home when running with `sudo`.)
+(When running with `sudo`, default `tls.ca_dir` / `tls.cert_dir` are resolved under the `SUDO_USER` home directory.)
 
 > [!WARNING]
 >
@@ -175,7 +176,7 @@ This forwards `https://example.com` to `http://localhost:3000`.
 - `[[proxy]].domain`
   - Routing domain (must be unique)
 - `[[proxy]].listen`
-  - Proxy listen address; all entries must use the same value in the current phase
+  - Proxy listen address; all entries must share the same value in the current version
 - `[[proxy]].upstream`
   - Upstream in `host:port` format
 
@@ -184,7 +185,8 @@ This forwards `https://example.com` to `http://localhost:3000`.
 ```sh
 git clone https://github.com/jxck/sptth.git
 cd sptth
-sudo env RUSTUP_TOOLCHAIN=1.92.0-aarch64-apple-darwin cargo run -- config.toml
+cargo build --release
+sudo ./target/release/sptth config.toml
 ```
 
 ## Verification
@@ -192,7 +194,6 @@ sudo env RUSTUP_TOOLCHAIN=1.92.0-aarch64-apple-darwin cargo run -- config.toml
 Start a local upstream server first:
 
 ```sh
-touch index.html
 echo "<title>hello</title>" > index.html
 python3 -m http.server 3000
 ```
@@ -215,4 +216,4 @@ curl https://example.com/
 
 ## ACK
 
-All of source codes are written in Rust by Codex.
+All source code was written in Rust by Codex.
