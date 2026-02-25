@@ -38,9 +38,8 @@ One command, one `sudo`, one process for all local development.
 ## Caution
 
 > [!CAUTION]
-> `sptth` is in **Early Preview** during `v0.x`.
-> It changes some of your local settings.
-> Use it at your own risk.
+> `sptth` changes your local system settings.
+> **Use it at your own risk**
 
 ## Security Notes
 
