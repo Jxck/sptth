@@ -1,7 +1,7 @@
 # sptth
 
 <p align="center">
-  <img src="docs/assets/logo-horizontal.svg" alt="sptth logo" width="900" />
+  <img src="docs/assets/logo.banner.svg" alt="sptth logo" width="900" />
 </p>
 
 All-in-one tool for local server development with **valid HTTPS**.
