@@ -136,7 +136,7 @@ async fn forward_dns_packet(
             ),
         );
 
-        let resolver = tokio::net::UdpSocket::bind("0.0.0.0:0")
+        let resolver = tokio::net::UdpSocket::bind("127.0.0.1:0")
             .await
             .context("failed to bind temporary dns socket")?;
         resolver
