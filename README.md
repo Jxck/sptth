@@ -11,13 +11,29 @@ All-in-one tool for local server development with **valid HTTPS**.
 Do you usually develop with URLs like `http://localhost:3000`?
 `localhost` is a special hostname and behaves differently from production, so things that work locally can fail after deployment on `https://${your-production-domain}`.
 
-`sptth` bundles everything needed to develop locally on real domains such as `https://${your-production-domain}`.
+Previously, setting up local real-domain HTTPS usually required three separate privileged steps:
+
+1. Map domain -> `127.0.0.1` (`/etc/hosts` or DNS settings)
+2. Create/install a local CA and issue certs (for example with `mkcert`)
+3. Bind a server on port `443`
+
+That meant dealing with `sudo` across multiple tools and steps.
+
+`sptth` now bundles everything needed to develop locally on real domains such as `https://${your-production-domain}`.
 
 - Local DNS
 - Local CA
 - Local reverse proxy
 
 You can start all of them with one `sudo` command and test locally in conditions closer to production.
+
+`sptth` consolidates this into one flow:
+
+```sh
+sudo sptth config.toml
+```
+
+One command, one `sudo`, one process for all local development.
 
 ## Caution
 
