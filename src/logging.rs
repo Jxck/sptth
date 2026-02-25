@@ -12,6 +12,7 @@ pub enum LogLevel {
 static LOG_LEVEL: OnceLock<LogLevel> = OnceLock::new();
 
 pub fn init(level: LogLevel) {
+    // Ignore repeated init calls so tests and main can both call safely.
     let _ = LOG_LEVEL.set(level);
 }
 

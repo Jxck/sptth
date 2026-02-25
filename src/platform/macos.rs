@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use crate::logging;
 
 pub fn install_ca_cert(ca_cert_path: &Path) -> Result<()> {
+    // Use System keychain so all local user processes can trust sptth-issued certs.
     let output = Command::new("security")
         .arg("add-trusted-cert")
         .arg("-d")

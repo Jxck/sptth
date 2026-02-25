@@ -42,6 +42,8 @@ pub async fn handle_dns_packet(
     );
 
     if let Some(addrs) = records.get(&qname) {
+        // Local records have priority over upstream to guarantee deterministic
+        // dev-domain routing.
         if qtype == RecordType::A || qtype == RecordType::AAAA || qtype.is_any() {
             return local_response(&req, &query, &qname, qtype, ttl, addrs);
         }
@@ -118,6 +120,8 @@ async fn forward_dns_packet(
     qtype: RecordType,
     upstream: &[SocketAddr],
 ) -> Result<Vec<u8>> {
+    // Try upstream servers in order. This gives simple failover behavior
+    // without adding extra retry state.
     for server in upstream {
         logging::debug(
             "DNS",

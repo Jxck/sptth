@@ -9,6 +9,7 @@ use anyhow::{Context, Result, bail};
 use crate::logging;
 
 pub fn install_ca_cert(ca_cert_path: &Path) -> Result<()> {
+    // Distros differ; support both Debian-style and RHEL-style trust commands.
     if has_command("update-ca-certificates") {
         install_with_update_ca_certificates(ca_cert_path)?;
         logging::info(
@@ -66,6 +67,7 @@ fn install_with_update_ca_trust(ca_cert_path: &Path) -> Result<()> {
 }
 
 fn has_command(name: &str) -> bool {
+    // Keep detection lightweight and avoid introducing extra dependencies.
     Command::new("sh")
         .arg("-c")
         .arg(format!("command -v {} >/dev/null 2>&1", name))

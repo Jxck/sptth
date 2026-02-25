@@ -57,6 +57,7 @@ pub async fn run(proxies: Vec<ProxyConfig>, tls_config: Arc<ServerConfig>) -> Re
             .context("failed to build proxy http client")?,
     };
 
+    // Route every path through the same reverse-proxy handler.
     let app = Router::new()
         .route("/", any(proxy_handler))
         .route("/{*path}", any(proxy_handler))
@@ -79,6 +80,8 @@ pub async fn run(proxies: Vec<ProxyConfig>, tls_config: Arc<ServerConfig>) -> Re
         let app = app.clone();
 
         tokio::spawn(async move {
+            // TLS handshake happens before HTTP routing; SNI-based certificate
+            // selection is handled inside rustls resolver.
             let tls_stream = match acceptor.accept(stream).await {
                 Ok(v) => v,
                 Err(err) => {
@@ -114,6 +117,8 @@ async fn proxy_handler(State(state): State<ProxyState>, req: Request<Body>) -> i
         .unwrap_or_default();
     let normalized_host = normalize_host(incoming_host);
 
+    // Upstream selection is based on HTTP Host so multiple domains can share
+    // a single listener address/port.
     let Some(route) = state.routes.get(&normalized_host) else {
         logging::error(
             "PROXY",
@@ -175,6 +180,8 @@ async fn forward(
         .request(parts.method.clone(), target)
         .body(body_bytes.to_vec());
 
+    // Remove hop-by-hop headers and rewrite Host implicitly for the upstream.
+    // Why: these headers are per-connection metadata and must not be forwarded.
     for (name, value) in &parts.headers {
         if *name != HeaderName::from_static("host") && !is_hop_by_hop(name) {
             upstream_req = upstream_req.header(name, value);
@@ -209,6 +216,8 @@ fn build_target_url(base_url: &str, uri: &Uri) -> String {
 }
 
 fn normalize_host(raw: &str) -> String {
+    // Normalize host values from either "example.com" or "example.com:443"
+    // into a route key.
     let host = raw.trim().trim_end_matches('.');
     if host.is_empty() {
         return String::new();

@@ -14,8 +14,11 @@ pub async fn run(config: AppConfig) -> Result<()> {
         bail!("tls.enabled must be true in this phase");
     }
 
+    // Boot order matters: certificates must exist before the TLS listener starts.
     let assets = ca::provision_certificates(&config.tls, &config.proxies)?;
     if assets.ca_created {
+        // Install trust only on first creation to avoid rewriting OS trust state
+        // on every run.
         platform::install_ca_cert(&assets.ca_cert_path)?;
     } else {
         logging::info("TLS", "ca exists, trust install skipped");
@@ -27,6 +30,7 @@ pub async fn run(config: AppConfig) -> Result<()> {
 
     tokio::select! {
         res = async {
+            // DNS and proxy are a single service unit; if either fails, fail fast.
             tokio::try_join!(dns_fut, proxy_fut)?;
             Ok::<(), anyhow::Error>(())
         } => res,
@@ -62,6 +66,7 @@ async fn run_dns(config: DnsConfig, records: HashMap<String, DomainAddrs>) -> Re
         let records = Arc::clone(&records);
         let upstream = Arc::clone(&upstream);
 
+        // Each request is handled in its own task to keep UDP receive loop responsive.
         task::spawn(async move {
             match dns::handle_dns_packet(
                 &req_packet,

@@ -15,6 +15,8 @@ use rustls::crypto::ring::default_provider;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // rustls 0.23 requires an explicit process-level crypto provider.
+    // We install ring here once at startup to avoid runtime panics later.
     let _ = default_provider().install_default();
 
     let config_path = parse_cli_args()?;

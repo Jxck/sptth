@@ -20,6 +20,7 @@ pub fn build_server_config(certs: &HashMap<String, IssuedCert>) -> Result<Arc<Se
 
     for (domain, files) in certs {
         let certified = Arc::new(load_certified_key(&files.cert_path, &files.key_path)?);
+        // Keep one fallback cert for clients that do not send SNI.
         if default.is_none() {
             default = Some(Arc::clone(&certified));
         }
@@ -86,6 +87,8 @@ impl ResolvesServerCert for DomainCertResolver {
             );
         }
 
+        // Fallback keeps handshake working for edge clients; HTTP Host routing
+        // still decides upstream target after TLS.
         Some(Arc::clone(&self.default))
     }
 }

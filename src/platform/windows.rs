@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use crate::logging;
 
 pub fn install_ca_cert(ca_cert_path: &Path) -> Result<()> {
+    // Root store is required so browsers and HTTP clients trust issued certs.
     let output = Command::new("certutil")
         .arg("-addstore")
         .arg("-f")

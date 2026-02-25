@@ -44,6 +44,8 @@ pub fn provision_certificates(tls: &TlsConfig, proxies: &[ProxyConfig]) -> Resul
         let cert_path = tls.cert_dir.join(format!("{}.pem", domain));
         let key_path = tls.cert_dir.join(format!("{}.key", domain));
 
+        // Reissue by age threshold instead of parsing X.509 on every run.
+        // Why: this keeps startup logic simple and fast for MVP.
         let reissue = should_reissue(&cert_path, tls.valid_days, tls.renew_before_days);
         if reissue {
             issue_domain_cert(
@@ -94,6 +96,7 @@ fn load_or_create_ca(tls: &TlsConfig) -> Result<CaSigner> {
             .with_context(|| format!("failed to read CA key: {}", ca_key_path.display()))?;
         let key = KeyPair::from_pem(&pem)
             .with_context(|| format!("failed to parse CA key: {}", ca_key_path.display()))?;
+        // If key exists but cert is missing, recover by regenerating cert from key.
         (key, !cert_exists)
     } else {
         let key = KeyPair::generate().context("failed to generate CA key")?;

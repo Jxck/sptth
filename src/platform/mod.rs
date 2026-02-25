@@ -10,6 +10,7 @@ mod macos;
 mod windows;
 
 pub fn install_ca_cert(ca_cert_path: &Path) -> Result<()> {
+    // Dispatch by target OS to keep platform-specific command logic isolated.
     #[cfg(target_os = "macos")]
     {
         return macos::install_ca_cert(ca_cert_path);

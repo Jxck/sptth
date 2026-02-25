@@ -84,6 +84,8 @@ pub struct ProxyConfig {
 }
 
 impl ProxyConfig {
+    // Keep config syntax compact ("host:port"), but always expose an HTTP base URL
+    // to the proxy layer.
     pub fn base_url(&self) -> String {
         format!("http://{}", self.upstream_host_port)
     }
@@ -145,6 +147,8 @@ impl AppConfig {
             bail!("tls.ca_common_name must not be empty");
         }
 
+        // Use a stable per-user location when paths are omitted, so running from
+        // different working directories does not create different CAs.
         let default_base = default_state_base_dir();
         let ca_dir = parsed
             .tls
@@ -227,6 +231,8 @@ impl AppConfig {
                 .parse::<SocketAddr>()
                 .with_context(|| format!("invalid proxy.listen address: {}", row.listen))?;
 
+            // MVP constraint: a single listener simplifies lifecycle and avoids
+            // accidental partial routing differences across proxy entries.
             match listen_seen {
                 None => listen_seen = Some(listen),
                 Some(v) if v == listen => {}
@@ -318,6 +324,8 @@ fn validate_upstream_host_port(input: &str) -> Result<()> {
 }
 
 fn default_state_base_dir() -> PathBuf {
+    // When run with sudo, we still want state files to belong to the invoking user
+    // rather than root's HOME to keep behavior predictable across restarts.
     if let Ok(sudo_user) = std::env::var("SUDO_USER") {
         if !sudo_user.trim().is_empty() && sudo_user != "root" {
             return PathBuf::from(format!("/Users/{}/.config/sptth", sudo_user));
