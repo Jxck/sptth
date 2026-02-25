@@ -17,6 +17,7 @@ struct RawConfig {
     tls: RawTls,
     record: Vec<RawRecord>,
     proxy: Vec<RawProxy>,
+    log_level: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -24,7 +25,6 @@ struct RawDns {
     listen: String,
     upstream: Vec<String>,
     ttl_seconds: Option<u32>,
-    log_level: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,7 +236,9 @@ impl AppConfig {
             match listen_seen {
                 None => listen_seen = Some(listen),
                 Some(v) if v == listen => {}
-                Some(_) => bail!("all proxy.listen values must be identical in this phase"),
+                Some(_) => {
+                    bail!("all proxy.listen values must be identical in the current version")
+                }
             }
 
             if row.upstream.contains("://") {
@@ -271,7 +273,7 @@ impl AppConfig {
             },
             records,
             proxies,
-            log_level: match parsed.dns.log_level.as_deref() {
+            log_level: match parsed.log_level.as_deref() {
                 None => LogLevel::Info,
                 Some(v) => LogLevel::parse(v)?,
             },
@@ -328,7 +330,9 @@ fn default_state_base_dir() -> PathBuf {
     // rather than root's HOME to keep behavior predictable across restarts.
     if let Ok(sudo_user) = std::env::var("SUDO_USER") {
         if !sudo_user.trim().is_empty() && sudo_user != "root" {
-            return PathBuf::from(format!("/Users/{}/.config/sptth", sudo_user));
+            if let Ok(Some(home)) = homedir::home(&sudo_user) {
+                return home.join(".config").join("sptth");
+            }
         }
     }
 
@@ -357,16 +361,17 @@ fn expand_tilde(input: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::AppConfig;
+    use super::{AppConfig, expand_tilde, normalize_domain};
 
     fn base_toml(proxy_block: &str) -> String {
         format!(
             r#"
+log_level = "info"
+
 [dns]
 listen = "127.0.0.1:53"
 upstream = ["1.1.1.1:53"]
 ttl_seconds = 1
-log_level = "info"
 
 [tls]
 enabled = true
@@ -469,5 +474,139 @@ upstream = "localhost:3000"
         let err = AppConfig::from_toml_str(&toml, "test")
             .expect_err("config should fail for invalid renew window");
         assert!(err.to_string().contains("renew_before_days"));
+    }
+
+    #[test]
+    fn accept_valid_config() {
+        let toml = base_toml(
+            r#"
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "localhost:3000"
+"#,
+        );
+
+        let config = AppConfig::from_toml_str(&toml, "test").expect("valid config should parse");
+        assert_eq!(config.dns.listen.port(), 53);
+        assert_eq!(config.proxies.len(), 1);
+        assert_eq!(config.proxies[0].domain, "example.com");
+    }
+
+    #[test]
+    fn normalize_domain_trims_and_lowercases() {
+        assert_eq!(normalize_domain("Example.COM"), "example.com");
+        assert_eq!(normalize_domain("example.com."), "example.com");
+        assert_eq!(normalize_domain("  Example.COM.  "), "example.com");
+        assert_eq!(normalize_domain(""), "");
+    }
+
+    #[test]
+    fn expand_tilde_with_home() {
+        let result = expand_tilde("/absolute/path");
+        assert_eq!(result.to_str().unwrap(), "/absolute/path");
+
+        let result = expand_tilde("relative/path");
+        assert_eq!(result.to_str().unwrap(), "relative/path");
+    }
+
+    #[test]
+    fn reject_duplicate_record_domain() {
+        let toml = r#"
+log_level = "info"
+
+[dns]
+listen = "127.0.0.1:53"
+upstream = ["1.1.1.1:53"]
+
+[tls]
+enabled = true
+ca_dir = "/tmp/sptth-ca"
+cert_dir = "/tmp/sptth-certs"
+
+[[record]]
+domain = "example.com"
+A = ["127.0.0.1"]
+
+[[record]]
+domain = "example.com"
+A = ["127.0.0.2"]
+
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "localhost:3000"
+"#;
+
+        let err = AppConfig::from_toml_str(toml, "test")
+            .expect_err("config should fail for duplicate record domain");
+        assert!(err.to_string().contains("duplicate record.domain"));
+    }
+
+    #[test]
+    fn reject_a_record_with_ipv6() {
+        let toml = base_toml(
+            r#"
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "localhost:3000"
+"#,
+        )
+        .replace(r#"A = ["127.0.0.1"]"#, r#"A = ["::1"]"#);
+
+        let err = AppConfig::from_toml_str(&toml, "test")
+            .expect_err("config should fail for IPv6 in A record");
+        assert!(err.to_string().contains("A must be IPv4"));
+    }
+
+    #[test]
+    fn reject_aaaa_record_with_ipv4() {
+        let toml = r#"
+log_level = "info"
+
+[dns]
+listen = "127.0.0.1:53"
+upstream = ["1.1.1.1:53"]
+
+[tls]
+enabled = true
+ca_dir = "/tmp/sptth-ca"
+cert_dir = "/tmp/sptth-certs"
+
+[[record]]
+domain = "example.com"
+AAAA = ["127.0.0.1"]
+
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "localhost:3000"
+"#;
+
+        let err = AppConfig::from_toml_str(toml, "test")
+            .expect_err("config should fail for IPv4 in AAAA record");
+        assert!(err.to_string().contains("AAAA must be IPv6"));
+    }
+
+    #[test]
+    fn reject_different_proxy_listen() {
+        let toml = base_toml(
+            r#"
+[[proxy]]
+domain = "example.com"
+listen = "127.0.0.1:443"
+upstream = "localhost:3000"
+
+[[proxy]]
+domain = "example.net"
+listen = "127.0.0.1:8443"
+upstream = "localhost:4000"
+"#,
+        );
+
+        let err = AppConfig::from_toml_str(&toml, "test")
+            .expect_err("config should fail for different listen addresses");
+        assert!(err.to_string().contains("must be identical"));
     }
 }

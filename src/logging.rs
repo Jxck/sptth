@@ -60,3 +60,34 @@ impl LogLevel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::LogLevel;
+
+    #[test]
+    fn parse_valid_levels() {
+        assert_eq!(LogLevel::parse("error").unwrap(), LogLevel::Error);
+        assert_eq!(LogLevel::parse("info").unwrap(), LogLevel::Info);
+        assert_eq!(LogLevel::parse("debug").unwrap(), LogLevel::Debug);
+    }
+
+    #[test]
+    fn parse_invalid_level() {
+        let err = LogLevel::parse("warn").expect_err("should fail for unknown level");
+        assert!(err.to_string().contains("invalid log_level"));
+    }
+
+    #[test]
+    fn level_ordering() {
+        assert!(LogLevel::Error < LogLevel::Info);
+        assert!(LogLevel::Info < LogLevel::Debug);
+    }
+
+    #[test]
+    fn as_str_roundtrip() {
+        for level in [LogLevel::Error, LogLevel::Info, LogLevel::Debug] {
+            assert_eq!(LogLevel::parse(level.as_str()).unwrap(), level);
+        }
+    }
+}

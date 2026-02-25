@@ -253,9 +253,9 @@ fn is_hop_by_hop(name: &HeaderName) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::Uri;
+    use axum::http::{HeaderName, Uri};
 
-    use super::{build_target_url, normalize_host};
+    use super::{build_target_url, is_hop_by_hop, normalize_host};
 
     #[test]
     fn normalize_host_removes_port() {
@@ -265,11 +265,32 @@ mod tests {
     }
 
     #[test]
+    fn normalize_host_ipv6() {
+        assert_eq!(normalize_host("[::1]:443"), "::1");
+        assert_eq!(normalize_host("[::1]"), "::1");
+    }
+
+    #[test]
+    fn normalize_host_empty() {
+        assert_eq!(normalize_host(""), "");
+        assert_eq!(normalize_host("   "), "");
+    }
+
+    #[test]
     fn build_target_keeps_path_and_query() {
         let uri: Uri = "/a?b=1".parse().expect("uri should parse");
         assert_eq!(
             build_target_url("http://localhost:3000", &uri),
             "http://localhost:3000/a?b=1"
         );
+    }
+
+    #[test]
+    fn hop_by_hop_headers() {
+        assert!(is_hop_by_hop(&HeaderName::from_static("connection")));
+        assert!(is_hop_by_hop(&HeaderName::from_static("transfer-encoding")));
+        assert!(is_hop_by_hop(&HeaderName::from_static("keep-alive")));
+        assert!(!is_hop_by_hop(&HeaderName::from_static("content-type")));
+        assert!(!is_hop_by_hop(&HeaderName::from_static("host")));
     }
 }

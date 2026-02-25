@@ -11,7 +11,7 @@ use crate::{
 
 pub async fn run(config: AppConfig) -> Result<()> {
     if !config.tls.enabled {
-        bail!("tls.enabled must be true in this phase");
+        bail!("tls.enabled must be true in the current version");
     }
 
     // Boot order matters: certificates must exist before the TLS listener starts.

@@ -205,3 +205,37 @@ fn should_reissue(cert_path: &Path, valid_days: u32, renew_before_days: u32) -> 
 
     age >= StdDuration::from_secs(u64::from(renew_after_days) * 24 * 60 * 60)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::should_reissue;
+
+    #[test]
+    fn reissue_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nonexistent.pem");
+        assert!(should_reissue(&path, 90, 30));
+    }
+
+    #[test]
+    fn no_reissue_when_file_is_fresh() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fresh.pem");
+        fs::write(&path, "test").unwrap();
+
+        // File was just created, so it's fresh (valid_days=90, renew_before_days=30 → renew after 60 days)
+        assert!(!should_reissue(&path, 90, 30));
+    }
+
+    #[test]
+    fn reissue_when_renew_window_covers_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cert.pem");
+        fs::write(&path, "test").unwrap();
+
+        // renew_before_days == valid_days → renew_after_days == 0 → always reissue
+        assert!(should_reissue(&path, 90, 90));
+    }
+}

@@ -101,6 +101,11 @@ The browser should not show certificate errors, because valid TLS certificates a
 
 ## Options
 
+### Top-level options
+
+- `log_level`
+  - Application-wide log level (default: `info`, values: `error` | `info` | `debug`)
+
 ### `[dns]` section
 
 ```toml
@@ -123,8 +128,6 @@ Queries for domains in `[[record]]` return local `A`/`AAAA` values; all others a
   - Upstream DNS servers
 - `[dns].ttl_seconds`
   - Record TTL (default: `1`)
-- `[dns].log_level`
-  - Log level (default: `info`)
 
 ### `[tls]` section
 
@@ -134,6 +137,8 @@ ca_dir = "~/.config/sptth/ca"
 cert_dir = "~/.config/sptth/certs"
 ```
 
+The `[tls]` section is required in the config file.
+
 `sptth` creates a local CA and installs it into the OS trust store.
 On first run, the generated CA certificate and key are saved in `ca_dir`.
 If files already exist in `ca_dir`, they are reused and trust-store modification is skipped.
@@ -141,8 +146,6 @@ If files already exist in `ca_dir`, they are reused and trust-store modification
 At startup, certificates for all domains in `[[proxy]]` are generated and signed by the local CA.
 Files are stored in `cert_dir` and used by the proxy to provide valid TLS in browsers.
 
-- `[tls].enabled`
-  - Enable/disable TLS features (default: `true`)
 - `[tls].ca_common_name`
   - Root CA common name (default: `sptth local ca`)
 - `[tls].valid_days`
