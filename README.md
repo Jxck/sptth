@@ -122,6 +122,8 @@ cargo run -p xtask -- fmt
 cargo run -p xtask -- fmt-check
 ```
 
+Use `fmt` locally to apply formatting. Use `fmt-check` in CI to fail on unformatted files.
+
 `xtask setup` installs pinned versions of:
 
 - `dprint` binary
