@@ -39,6 +39,8 @@ Keep release identifiers consistent across:
 - Update `/Users/jxck/develop/sptth/Cargo.toml` to `version = "X.Y.Z"`.
 - Update `/Users/jxck/develop/sptth/xtask/Cargo.toml` to `version = "X.Y.Z"`.
 - Update fixed release examples in docs (for example `README.md` `VERSION=vX.Y.Z`).
+- Do **not** edit `Cargo.lock` manually.
+- Refresh lockfile metadata via Cargo commands after manifest updates (for example `cargo check --workspace`).
 
 3. Validate
 
