@@ -264,7 +264,7 @@ mod tests {
         let path = dir.path().join("fresh.pem");
         fs::write(&path, "test").unwrap();
 
-        // File was just created, so it's fresh (valid_days=90, renew_before_days=30 → renew after 60 days)
+        // File was just created, so it's fresh (valid_days=90, renew_before_days=30 -> renew after 60 days)
         assert!(!should_reissue(&path, 90, 30));
     }
 
@@ -274,7 +274,7 @@ mod tests {
         let path = dir.path().join("cert.pem");
         fs::write(&path, "test").unwrap();
 
-        // renew_before_days == valid_days → renew_after_days == 0 → always reissue
+        // renew_before_days == valid_days -> renew_after_days == 0 -> always reissue
         assert!(should_reissue(&path, 90, 90));
     }
 
