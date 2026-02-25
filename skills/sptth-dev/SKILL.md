@@ -1,3 +1,8 @@
+---
+name: sptth-dev
+description: Use when making code or documentation changes in this repository. Provides consistent workflow and validation steps.
+---
+
 # sptth-dev Skill
 
 Use this skill when making code/documentation changes in this repository.

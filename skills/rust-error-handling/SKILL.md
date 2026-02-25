@@ -1,3 +1,8 @@
+---
+name: rust-error-handling
+description: Use when changing Rust code paths that return errors or log failures. Ensures errors are actionable, consistent, and safe.
+---
+
 # rust-error-handling Skill
 
 Use this skill when changing Rust code paths that return errors or log failures.

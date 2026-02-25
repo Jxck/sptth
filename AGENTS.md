@@ -21,6 +21,8 @@ Project-wide guidance for AI coding agents and contributors.
    - `cargo check --workspace`
 2. Do not bypass failing checks unless explicitly requested by the maintainer.
 3. Keep changes scoped to one concern per commit.
+4. After branch work is complete and before merge, run the
+   `health-check` skill (`skills/health-check/SKILL.md`).
 
 ## Formatting
 
@@ -31,7 +33,7 @@ Project-wide guidance for AI coding agents and contributors.
 
 ## Commit Message Policy
 
-- Follow `/Users/jxck/develop/sptth/docs/commit-message.md`.
+- Follow `docs/commit-message.md`.
 - All commit message content must be written in English.
 - Required structure:
   1. short subject
