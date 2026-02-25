@@ -43,28 +43,6 @@ body:
     validations:
       required: true
   - type: textarea
-    id: suggested_ai_prompt
-    attributes:
-      label: Suggested AI Prompt (implementation plan)
-      description: |
-        Optional. If you want this implemented, provide the exact prompt you would give to an AI coding agent.
-        Include scope, constraints, acceptance criteria, and files likely to change.
-      placeholder: |
-        Goal:
-        - ...
-
-        Scope:
-        - ...
-
-        Constraints:
-        - ...
-
-        Acceptance criteria:
-        - ...
-      render: markdown
-    validations:
-      required: false
-  - type: textarea
     id: config
     attributes:
       label: Relevant config.toml (optional)
@@ -82,14 +60,25 @@ body:
   - type: input
     id: version
     attributes:
-      label: sptth version
+      label: sptth version (optional)
       placeholder: v0.0.2 / commit hash / cargo run
     validations:
       required: false
   - type: input
     id: os
     attributes:
-      label: OS
+      label: OS (optional)
       placeholder: macOS / Linux / Windows
+    validations:
+      required: false
+  - type: textarea
+    id: suggested_ai_prompt
+    attributes:
+      label: Suggested AI Prompt (optional)
+      description: |
+        Optional. If you want this implemented, provide the exact prompt you would give to an AI coding agent.
+        Include scope, constraints, acceptance criteria, and files likely to change.
+      placeholder: AI Prompt
+      render: markdown
     validations:
       required: false
