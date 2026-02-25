@@ -136,7 +136,14 @@ async fn forward_dns_packet(
             ),
         );
 
-        let resolver = tokio::net::UdpSocket::bind("127.0.0.1:0")
+        // Bind an ephemeral socket with the same IP family as the upstream
+        // target so forwarding works for both IPv4 and IPv6 resolvers.
+        let bind_addr = if server.is_ipv4() {
+            "0.0.0.0:0"
+        } else {
+            "[::]:0"
+        };
+        let resolver = tokio::net::UdpSocket::bind(bind_addr)
             .await
             .context("failed to bind temporary dns socket")?;
         resolver
