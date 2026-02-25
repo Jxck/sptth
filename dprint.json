@@ -1,0 +1,8 @@
+{
+  "includes": ["**/*.md", "**/*.toml"],
+  "excludes": ["target/", ".tools/"],
+  "plugins": [
+    "./.tools/dprint/plugins/markdown-0.21.1.wasm",
+    "./.tools/dprint/plugins/toml-0.7.0.wasm"
+  ]
+}

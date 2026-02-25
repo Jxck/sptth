@@ -44,6 +44,29 @@ Set DNS manually to `127.0.0.1` in `Settings > Network`, or configure `/etc/reso
 
 TODO: add binary release installation steps.
 
+## Development Setup
+
+After cloning, run setup once to install local development tools into `.tools/`.
+
+```sh
+cargo run -p xtask -- setup
+```
+
+Formatting commands:
+
+```sh
+cargo run -p xtask -- fmt
+cargo run -p xtask -- fmt-check
+```
+
+`xtask setup` installs pinned versions of:
+
+- `dprint` binary
+- Markdown plugin
+- TOML plugin
+
+Artifacts are stored in `.tools/` and are not committed to git.
+
 ## Run
 
 ```sh
@@ -188,6 +211,7 @@ This forwards `https://example.com` to `http://localhost:3000`.
 ```sh
 git clone https://github.com/jxck/sptth.git
 cd sptth
+cargo run -p xtask -- setup
 cargo build --release
 sudo ./target/release/sptth config.toml
 ```

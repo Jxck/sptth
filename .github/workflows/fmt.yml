@@ -1,0 +1,20 @@
+name: fmt
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  dprint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache local tools
+        uses: actions/cache@v4
+        with:
+          path: .tools
+          key: ${{ runner.os }}-tools-${{ hashFiles('Cargo.lock', 'xtask/Cargo.toml', 'xtask/src/main.rs', 'dprint.json') }}
+      - name: Check formatting
+        run: cargo run -p xtask -- fmt-check
