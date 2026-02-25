@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, anyhow};
 use axum::{
@@ -12,7 +12,7 @@ use axum::{
 use hyper::{body::Incoming, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
 use rustls::ServerConfig;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::Semaphore};
 use tokio_rustls::TlsAcceptor;
 use tower::ServiceExt;
 
@@ -20,6 +20,16 @@ use crate::{config::ProxyConfig, logging};
 
 /// Cap request bodies to prevent memory exhaustion from oversized uploads.
 const MAX_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+/// Cap upstream response bodies to the same limit.
+const MAX_RESPONSE_BODY_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+/// Timeout for connecting to the upstream HTTP server.
+const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Overall timeout for an upstream HTTP round-trip.
+const UPSTREAM_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Timeout for the TLS handshake with the client.
+const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Cap concurrent proxy connections to prevent resource exhaustion.
+const MAX_CONCURRENT_CONNECTIONS: usize = 512;
 
 #[derive(Clone)]
 struct ProxyRoute {
@@ -56,6 +66,8 @@ pub async fn run(proxies: Vec<ProxyConfig>, tls_config: Arc<ServerConfig>) -> Re
         routes: Arc::new(routes),
         client: reqwest::Client::builder()
             .use_rustls_tls()
+            .connect_timeout(UPSTREAM_CONNECT_TIMEOUT)
+            .timeout(UPSTREAM_REQUEST_TIMEOUT)
             .build()
             .context("failed to build proxy http client")?,
     };
@@ -71,6 +83,8 @@ pub async fn run(proxies: Vec<ProxyConfig>, tls_config: Arc<ServerConfig>) -> Re
         .with_context(|| format!("failed to bind proxy socket {}", listen))?;
     let acceptor = TlsAcceptor::from(tls_config);
 
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
+
     logging::info("PROXY", &format!("https proxy listening on {}", listen));
 
     loop {
@@ -79,22 +93,42 @@ pub async fn run(proxies: Vec<ProxyConfig>, tls_config: Arc<ServerConfig>) -> Re
             .await
             .context("failed to accept proxy tcp connection")?;
 
+        let permit = match semaphore.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                logging::error(
+                    "PROXY",
+                    &format!(
+                        "dropping connection from {}: too many concurrent connections",
+                        peer
+                    ),
+                );
+                continue;
+            }
+        };
+
         let acceptor = acceptor.clone();
         let app = app.clone();
 
         tokio::spawn(async move {
+            let _permit = permit;
             // TLS handshake happens before HTTP routing; SNI-based certificate
             // selection is handled inside rustls resolver.
-            let tls_stream = match acceptor.accept(stream).await {
-                Ok(v) => v,
-                Err(err) => {
-                    logging::error(
-                        "PROXY",
-                        &format!("tls handshake failed peer={} err={}", peer, err),
-                    );
-                    return;
-                }
-            };
+            let tls_stream =
+                match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
+                    Ok(Ok(v)) => v,
+                    Ok(Err(err)) => {
+                        logging::error(
+                            "PROXY",
+                            &format!("tls handshake failed peer={} err={}", peer, err),
+                        );
+                        return;
+                    }
+                    Err(_) => {
+                        logging::error("PROXY", &format!("tls handshake timed out peer={}", peer));
+                        return;
+                    }
+                };
 
             let io = TokioIo::new(tls_stream);
             let service = service_fn(move |req: Request<Incoming>| {
@@ -210,10 +244,23 @@ async fn forward(
         .context("failed to send upstream request")?;
     let status = upstream_resp.status();
     let headers = upstream_resp.headers().clone();
+    let content_length = upstream_resp.content_length().unwrap_or(0) as usize;
+    if content_length > MAX_RESPONSE_BODY_BYTES {
+        return Ok(Response::builder()
+            .status(StatusCode::BAD_GATEWAY)
+            .body(Body::from("upstream response body too large"))
+            .expect("static response must build"));
+    }
     let body = upstream_resp
         .bytes()
         .await
         .context("failed to read upstream response body")?;
+    if body.len() > MAX_RESPONSE_BODY_BYTES {
+        return Ok(Response::builder()
+            .status(StatusCode::BAD_GATEWAY)
+            .body(Body::from("upstream response body too large"))
+            .expect("static response must build"));
+    }
 
     let mut resp = Response::builder().status(status);
     for (name, value) in &headers {

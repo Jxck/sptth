@@ -34,8 +34,10 @@ pub struct TlsAssets {
 pub fn provision_certificates(tls: &TlsConfig, proxies: &[ProxyConfig]) -> Result<TlsAssets> {
     fs::create_dir_all(&tls.ca_dir)
         .with_context(|| format!("failed to create ca_dir: {}", tls.ca_dir.display()))?;
+    set_dir_permissions(&tls.ca_dir)?;
     fs::create_dir_all(&tls.cert_dir)
         .with_context(|| format!("failed to create cert_dir: {}", tls.cert_dir.display()))?;
+    set_dir_permissions(&tls.cert_dir)?;
 
     let signer = load_or_create_ca(tls)?;
     let mut certs = HashMap::<String, IssuedCert>::new();
@@ -179,6 +181,21 @@ fn issue_domain_cert(
     Ok(())
 }
 
+/// Restrict directory permissions to owner-only (0700 on Unix).
+fn set_dir_permissions(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("failed to set directory permissions: {}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+    Ok(())
+}
+
 /// Write private key PEM with owner-only permissions (0600 on Unix).
 fn write_private_key(path: &Path, pem: &str) -> Result<()> {
     #[cfg(unix)]
@@ -247,7 +264,7 @@ mod tests {
         let path = dir.path().join("fresh.pem");
         fs::write(&path, "test").unwrap();
 
-        // File was just created, so it's fresh (valid_days=90, renew_before_days=30 → renew after 60 days)
+        // File was just created, so it's fresh (valid_days=90, renew_before_days=30 -> renew after 60 days)
         assert!(!should_reissue(&path, 90, 30));
     }
 
@@ -257,7 +274,7 @@ mod tests {
         let path = dir.path().join("cert.pem");
         fs::write(&path, "test").unwrap();
 
-        // renew_before_days == valid_days → renew_after_days == 0 → always reissue
+        // renew_before_days == valid_days -> renew_after_days == 0 -> always reissue
         assert!(should_reissue(&path, 90, 90));
     }
 

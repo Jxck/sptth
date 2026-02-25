@@ -1,4 +1,4 @@
-name: fmt
+name: ci
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  dprint:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,3 +20,7 @@ jobs:
           key: ${{ runner.os }}-tools-${{ hashFiles('Cargo.lock', 'xtask/Cargo.toml', 'xtask/src/main.rs', 'dprint.json') }}
       - name: Check formatting
         run: cargo run -p xtask -- fmt-check
+      - name: Check workspace
+        run: cargo check --workspace
+      - name: Run tests
+        run: cargo test -q

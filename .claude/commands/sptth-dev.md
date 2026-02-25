@@ -1,0 +1,1 @@
+../../skills/sptth-dev/SKILL.md
