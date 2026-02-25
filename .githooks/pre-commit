@@ -4,7 +4,4 @@ set -eu
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-cargo run -p xtask -- fmt
-
-# Re-stage only already tracked/previously staged paths.
-git add -u -- '*.rs' '*.json' '*.md' '*.toml'
+cargo run -p xtask -- fmt-check

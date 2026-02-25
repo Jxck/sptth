@@ -5,12 +5,12 @@ upstream = ["1.1.1.1:53", "8.8.8.8:53"]
 [[record]]
 domain = "example.com"
 A = ["127.0.0.1"]
-AAAA = ["::1"]
+# AAAA = ["::1"]
 
 [[record]]
 domain = "example.net"
 A = ["127.0.0.1"]
-AAAA = ["::1"]
+# AAAA = ["::1"]
 
 [tls]
 ca_dir = "~/.config/sptth/ca"

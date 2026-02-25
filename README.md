@@ -73,7 +73,7 @@ cargo run -p xtask -- fmt-check
 Artifacts are stored in `.tools/` and are not committed to git.
 
 `xtask setup` also enables repository hooks via `core.hooksPath=.githooks`.
-The `pre-commit` hook auto-formats and re-stages `*.rs`, `*.json`, `*.md`, and `*.toml`.
+The `pre-commit` hook runs format checks for `*.rs`, `*.json`, `*.md`, and `*.toml`, and blocks commit when formatting is not clean.
 
 ## Run
 
