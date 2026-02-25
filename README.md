@@ -55,7 +55,7 @@ Set DNS manually to `127.0.0.1` in `Settings > Network`, or configure `/etc/reso
 
 ## Install
 
-TODO: add binary release installation steps.
+See `docs/release.md` for release and artifact verification policy.
 
 ## Development Setup
 
