@@ -58,7 +58,7 @@ Change your OS DNS server to `127.0.0.1`.
 
 ### macOS
 
-`System Settings > Network > Wi-Fi Details > DNS > DNS Servers`
+`System Settings > Network > ${Connected Network Device} > DNS > DNS Servers`
 
 ![DNS Settings on macOS](docs/assets/dns-settings-on-macos.png)
 
