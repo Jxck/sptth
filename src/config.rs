@@ -28,11 +28,11 @@ struct RawDns {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawTls {
     enabled: Option<bool>,
     ca_dir: Option<String>,
     cert_dir: Option<String>,
-    ca_common_name: Option<String>,
     valid_days: Option<u32>,
     renew_before_days: Option<u32>,
 }
@@ -71,7 +71,6 @@ pub struct TlsConfig {
     pub enabled: bool,
     pub ca_dir: PathBuf,
     pub cert_dir: PathBuf,
-    pub ca_common_name: String,
     pub valid_days: u32,
     pub renew_before_days: u32,
 }
@@ -137,14 +136,6 @@ impl AppConfig {
         }
         if tls_renew_before_days >= tls_valid_days {
             bail!("tls.renew_before_days must be smaller than tls.valid_days");
-        }
-
-        let ca_common_name = parsed
-            .tls
-            .ca_common_name
-            .unwrap_or_else(|| "sptth local ca".to_string());
-        if ca_common_name.trim().is_empty() {
-            bail!("tls.ca_common_name must not be empty");
         }
 
         // Use a stable per-user location when paths are omitted, so running from
@@ -267,7 +258,6 @@ impl AppConfig {
                 enabled: tls_enabled,
                 ca_dir,
                 cert_dir,
-                ca_common_name,
                 valid_days: tls_valid_days,
                 renew_before_days: tls_renew_before_days,
             },
@@ -380,7 +370,6 @@ ttl_seconds = 1
 enabled = true
 ca_dir = "/tmp/sptth-ca"
 cert_dir = "/tmp/sptth-certs"
-ca_common_name = "sptth local ca"
 valid_days = 90
 renew_before_days = 30
 

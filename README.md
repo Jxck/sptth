@@ -256,8 +256,6 @@ If files already exist in `ca_dir`, they are reused and trust-store modification
 At startup, certificates for all domains in `[[proxy]]` are generated and signed by the local CA.
 Files are stored in `cert_dir` and used by the proxy to provide valid TLS in browsers.
 
-- `[tls].ca_common_name`
-  - Root CA common name (default: `sptth local ca`)
 - `[tls].valid_days`
   - Server certificate validity in days (default: `90`)
 - `[tls].renew_before_days`

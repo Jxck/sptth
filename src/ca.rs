@@ -18,6 +18,8 @@ use crate::{
     logging,
 };
 
+const ROOT_CA_COMMON_NAME: &str = "sptth local ca";
+
 #[derive(Debug, Clone)]
 pub struct IssuedCert {
     pub cert_path: PathBuf,
@@ -111,7 +113,7 @@ fn load_or_create_ca(tls: &TlsConfig) -> Result<CaSigner> {
     let mut params = CertificateParams::default();
     params
         .distinguished_name
-        .push(DnType::CommonName, tls.ca_common_name.clone());
+        .push(DnType::CommonName, ROOT_CA_COMMON_NAME);
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     params.key_usages = vec![
         KeyUsagePurpose::KeyCertSign,
