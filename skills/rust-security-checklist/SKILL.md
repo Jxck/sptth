@@ -1,3 +1,8 @@
+---
+name: rust-security-checklist
+description: Use before merging security-relevant Rust changes. Catches common local-service security regressions.
+---
+
 # rust-security-checklist Skill
 
 Use this skill before merging security-relevant Rust changes.

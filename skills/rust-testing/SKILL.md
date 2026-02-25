@@ -1,3 +1,8 @@
+---
+name: rust-testing
+description: Use when adding or modifying tests. Ensures behavior changes are covered with focused tests and fast feedback.
+---
+
 # rust-testing Skill
 
 Use this skill when adding or modifying tests in this repository.
