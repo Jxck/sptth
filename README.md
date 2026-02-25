@@ -30,7 +30,7 @@ Change your OS DNS server to `127.0.0.1`.
 
 `System Settings > Network > Wi-Fi Details > DNS > DNS Servers`
 
-![DNS Settings on macOS](dns-settings-on-macos.png)
+![DNS Settings on macOS](docs/assets/dns-settings-on-macos.png)
 
 ### Windows
 
