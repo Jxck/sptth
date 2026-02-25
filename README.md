@@ -64,8 +64,12 @@ cargo run -p xtask -- fmt-check
 - `dprint` binary
 - Markdown plugin
 - TOML plugin
+- JSON plugin
 
 Artifacts are stored in `.tools/` and are not committed to git.
+
+`xtask setup` also enables repository hooks via `core.hooksPath=.githooks`.
+The `pre-commit` hook auto-formats and re-stages `*.rs`, `*.json`, `*.md`, and `*.toml`.
 
 ## Run
 

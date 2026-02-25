@@ -16,8 +16,11 @@ const MARKDOWN_PLUGIN_SHA256: &str =
 
 const TOML_PLUGIN_URL: &str = "https://plugins.dprint.dev/toml-0.7.0.wasm";
 const TOML_PLUGIN_FILE: &str = "toml-0.7.0.wasm";
-const TOML_PLUGIN_SHA256: &str =
-    "0126c8112691542d30b52a639076ecc83e07bace877638cee7c6915fd36b8629";
+const TOML_PLUGIN_SHA256: &str = "0126c8112691542d30b52a639076ecc83e07bace877638cee7c6915fd36b8629";
+
+const JSON_PLUGIN_URL: &str = "https://plugins.dprint.dev/json-0.21.0.wasm";
+const JSON_PLUGIN_FILE: &str = "json-0.21.0.wasm";
+const JSON_PLUGIN_SHA256: &str = "188a08916eeccf2414e06c8b51d8f44d3695f055a0d63cef39eace0a11e247bc";
 
 struct PluginSpec {
     url: &'static str,
@@ -36,6 +39,11 @@ const PLUGINS: &[PluginSpec] = &[
         file: TOML_PLUGIN_FILE,
         sha256: TOML_PLUGIN_SHA256,
     },
+    PluginSpec {
+        url: JSON_PLUGIN_URL,
+        file: JSON_PLUGIN_FILE,
+        sha256: JSON_PLUGIN_SHA256,
+    },
 ];
 
 fn main() -> Result<()> {
@@ -44,12 +52,14 @@ fn main() -> Result<()> {
     match args.next().as_deref() {
         Some("setup") => cmd_setup(&root),
         Some("fmt") => {
-            cmd_setup(&root)?;
-            run_dprint(&root, &["fmt"])
+            ensure_tools(&root)?;
+            run_dprint(&root, &["fmt"])?;
+            run_rustfmt(&root, false)
         }
         Some("fmt-check") => {
-            cmd_setup(&root)?;
-            run_dprint(&root, &["check"])
+            ensure_tools(&root)?;
+            run_dprint(&root, &["check"])?;
+            run_rustfmt(&root, true)
         }
         _ => {
             eprintln!("usage: cargo run -p xtask -- <setup|fmt|fmt-check>");
@@ -59,6 +69,12 @@ fn main() -> Result<()> {
 }
 
 fn cmd_setup(root: &Path) -> Result<()> {
+    ensure_tools(root)?;
+    ensure_git_hooks(root)?;
+    Ok(())
+}
+
+fn ensure_tools(root: &Path) -> Result<()> {
     fs::create_dir_all(tools_root(&root).join("dprint").join("plugins"))
         .context("failed to create plugin directory")?;
     fs::create_dir_all(tools_root(&root).join("dprint").join("cache"))
@@ -134,10 +150,14 @@ fn ensure_dprint_binary(root: &Path) -> Result<()> {
 }
 
 fn ensure_plugin(root: &Path, client: &reqwest::blocking::Client, spec: &PluginSpec) -> Result<()> {
-    let path = tools_root(root).join("dprint").join("plugins").join(spec.file);
+    let path = tools_root(root)
+        .join("dprint")
+        .join("plugins")
+        .join(spec.file);
 
     if path.exists() {
-        let bytes = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        let bytes =
+            fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
         let digest = sha256_hex(&bytes);
         if digest == spec.sha256 {
             return Ok(());
@@ -176,6 +196,60 @@ fn ensure_plugin(root: &Path, client: &reqwest::blocking::Client, spec: &PluginS
     Ok(())
 }
 
+fn ensure_git_hooks(root: &Path) -> Result<()> {
+    let hooks_dir = root.join(".githooks");
+    fs::create_dir_all(&hooks_dir).context("failed to create .githooks directory")?;
+
+    let hook_path = hooks_dir.join("pre-commit");
+    if !hook_path.exists() {
+        bail!(
+            "missing git hook file: {}. restore repository files and re-run setup",
+            hook_path.display()
+        );
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&hook_path)
+            .with_context(|| format!("failed to read {}", hook_path.display()))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&hook_path, perms)
+            .with_context(|| format!("failed to set executable bit on {}", hook_path.display()))?;
+    }
+
+    let status = Command::new("git")
+        .arg("config")
+        .arg("--local")
+        .arg("core.hooksPath")
+        .arg(".githooks")
+        .current_dir(root)
+        .status()
+        .context("failed to configure git hooksPath")?;
+    if !status.success() {
+        bail!("git config core.hooksPath failed with status {}", status);
+    }
+
+    Ok(())
+}
+
+fn run_rustfmt(root: &Path, check: bool) -> Result<()> {
+    let mut command = Command::new("cargo");
+    command.arg("fmt").arg("--all");
+    if check {
+        command.arg("--").arg("--check");
+    }
+    let status = command
+        .current_dir(root)
+        .status()
+        .context("failed to run cargo fmt")?;
+    if !status.success() {
+        bail!("cargo fmt failed with status {}", status);
+    }
+    Ok(())
+}
+
 fn sha256_hex(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);
@@ -188,7 +262,11 @@ fn dprint_version(path: &Path) -> Result<String> {
         .output()
         .with_context(|| format!("failed to run {}", path.display()))?;
     if !output.status.success() {
-        bail!("{} --version failed with status {}", path.display(), output.status);
+        bail!(
+            "{} --version failed with status {}",
+            path.display(),
+            output.status
+        );
     }
     let stdout = String::from_utf8(output.stdout).context("dprint output was not UTF-8")?;
     let version = stdout
@@ -199,7 +277,11 @@ fn dprint_version(path: &Path) -> Result<String> {
 }
 
 fn dprint_bin(root: &Path) -> PathBuf {
-    let exe = if cfg!(windows) { "dprint.exe" } else { "dprint" };
+    let exe = if cfg!(windows) {
+        "dprint.exe"
+    } else {
+        "dprint"
+    };
     tools_root(root).join("bin").join(exe)
 }
 
