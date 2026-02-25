@@ -35,14 +35,10 @@ Project-wide guidance for AI coding agents and contributors.
 
 - Follow `docs/commit-message.md`.
 - All commit message content must be written in English.
-- Required structure:
-  1. short subject
-  2. 3-bullet compressed summary
-  3. sections per summary item with:
-     - Background
-     - Review
-     - Decision
-     - Impact
+- Scale commit message size to change size:
+  1. small changes: short subject (+ optional 1-2 bullets)
+  2. medium changes: subject + up to 3 bullets
+  3. large changes: full structured format in `docs/commit-message.md`
 
 ## Change Design Rules
 

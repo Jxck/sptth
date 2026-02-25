@@ -2,17 +2,24 @@
 
 This project uses a structured commit message format to preserve decision context.
 
-## Required Structure
+## Required Structure (Scale by Change Size)
 
-1. Subject line (short, imperative)
-2. Compressed summary list (3 bullets)
-3. Per-bullet detailed sections with:
-   - Background
-   - Review
-   - Decision
-   - Impact
+1. Small change (for example: 1 file, tiny fix/docs tweak)
+   - Subject line
+   - Optional 1-2 short bullets
+2. Medium change (for example: a few files, one coherent behavior change)
+   - Subject line
+   - Up to 3 summary bullets
+3. Large change (for example: multi-module feature/refactor)
+   - Subject line
+   - 3 summary bullets
+   - Per-bullet detailed sections with:
+     - Background
+     - Review
+     - Decision
+     - Impact
 
-## Template
+## Template (Large Change)
 
 ```text
 <subject>
@@ -71,3 +78,4 @@ git commit -m "Harden DNS source validation" \
 - Keep each section concise and factual.
 - Do not include unrelated changes in the same commit.
 - If pre-commit checks are bypassed, state the reason in the commit body.
+- Do not use the large-change template for tiny commits.
