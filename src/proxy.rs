@@ -244,8 +244,8 @@ async fn forward(
         .context("failed to send upstream request")?;
     let status = upstream_resp.status();
     let headers = upstream_resp.headers().clone();
-    let content_length = upstream_resp.content_length().unwrap_or(0) as usize;
-    if content_length > MAX_RESPONSE_BODY_BYTES {
+    let content_length = upstream_resp.content_length().unwrap_or(0);
+    if content_length > MAX_RESPONSE_BODY_BYTES as u64 {
         return Ok(Response::builder()
             .status(StatusCode::BAD_GATEWAY)
             .body(Body::from("upstream response body too large"))
@@ -286,16 +286,17 @@ fn normalize_host(raw: &str) -> String {
         return String::new();
     }
 
-    if host.starts_with('[') {
-        if let Some(end) = host.find(']') {
-            return host[1..end].to_ascii_lowercase();
-        }
+    if host.starts_with('[')
+        && let Some(end) = host.find(']')
+    {
+        return host[1..end].to_ascii_lowercase();
     }
 
-    if let Some((name, _port)) = host.rsplit_once(':') {
-        if !name.is_empty() && !name.contains(':') {
-            return name.to_ascii_lowercase();
-        }
+    if let Some((name, _port)) = host.rsplit_once(':')
+        && !name.is_empty()
+        && !name.contains(':')
+    {
+        return name.to_ascii_lowercase();
     }
 
     host.to_ascii_lowercase()

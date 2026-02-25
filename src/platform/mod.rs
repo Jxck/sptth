@@ -13,17 +13,17 @@ pub fn install_ca_cert(ca_cert_path: &Path) -> Result<()> {
     // Dispatch by target OS to keep platform-specific command logic isolated.
     #[cfg(target_os = "macos")]
     {
-        return macos::install_ca_cert(ca_cert_path);
+        macos::install_ca_cert(ca_cert_path)
     }
 
     #[cfg(target_os = "linux")]
     {
-        return linux::install_ca_cert(ca_cert_path);
+        linux::install_ca_cert(ca_cert_path)
     }
 
     #[cfg(target_os = "windows")]
     {
-        return windows::install_ca_cert(ca_cert_path);
+        windows::install_ca_cert(ca_cert_path)
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]

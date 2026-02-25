@@ -318,12 +318,12 @@ fn validate_upstream_host_port(input: &str) -> Result<()> {
 /// Resolve the invoking user's home directory, preferring SUDO_USER's home when
 /// running under sudo so that paths stay consistent regardless of privilege.
 fn resolve_home() -> Option<PathBuf> {
-    if let Ok(sudo_user) = std::env::var("SUDO_USER") {
-        if !sudo_user.trim().is_empty() && sudo_user != "root" {
-            if let Ok(Some(home)) = homedir::home(&sudo_user) {
-                return Some(home);
-            }
-        }
+    if let Ok(sudo_user) = std::env::var("SUDO_USER")
+        && !sudo_user.trim().is_empty()
+        && sudo_user != "root"
+        && let Ok(Some(home)) = homedir::home(&sudo_user)
+    {
+        return Some(home);
     }
 
     std::env::var("HOME")
@@ -339,15 +339,15 @@ fn default_state_base_dir() -> PathBuf {
 }
 
 fn expand_tilde(input: &str) -> PathBuf {
-    if input == "~" {
-        if let Some(home) = resolve_home() {
-            return home;
-        }
+    if input == "~"
+        && let Some(home) = resolve_home()
+    {
+        return home;
     }
-    if let Some(suffix) = input.strip_prefix("~/") {
-        if let Some(home) = resolve_home() {
-            return home.join(suffix);
-        }
+    if let Some(suffix) = input.strip_prefix("~/")
+        && let Some(home) = resolve_home()
+    {
+        return home.join(suffix);
     }
     PathBuf::from(input)
 }

@@ -75,36 +75,36 @@ fn cmd_setup(root: &Path) -> Result<()> {
 }
 
 fn ensure_tools(root: &Path) -> Result<()> {
-    fs::create_dir_all(tools_root(&root).join("dprint").join("plugins"))
+    fs::create_dir_all(tools_root(root).join("dprint").join("plugins"))
         .context("failed to create plugin directory")?;
-    fs::create_dir_all(tools_root(&root).join("dprint").join("cache"))
+    fs::create_dir_all(tools_root(root).join("dprint").join("cache"))
         .context("failed to create dprint cache directory")?;
 
-    ensure_dprint_binary(&root)?;
+    ensure_dprint_binary(root)?;
     let client = reqwest::blocking::Client::builder()
         .user_agent("sptth-xtask")
         .build()
         .context("failed to build HTTP client")?;
 
     for plugin in PLUGINS {
-        ensure_plugin(&root, &client, plugin)?;
+        ensure_plugin(root, &client, plugin)?;
     }
 
     Ok(())
 }
 
 fn run_dprint(root: &Path, args: &[&str]) -> Result<()> {
-    let dprint = dprint_bin(&root);
+    let dprint = dprint_bin(root);
     if !dprint.exists() {
         bail!("dprint binary is missing: run `cargo run -p xtask -- setup`");
     }
 
-    let cache_dir = tools_root(&root).join("dprint").join("cache");
+    let cache_dir = tools_root(root).join("dprint").join("cache");
     fs::create_dir_all(&cache_dir).context("failed to create dprint cache directory")?;
 
     let status = Command::new(&dprint)
         .args(args)
-        .current_dir(&root)
+        .current_dir(root)
         .env("DPRINT_CACHE_DIR", cache_dir)
         .status()
         .with_context(|| format!("failed to execute {}", dprint.display()))?;
