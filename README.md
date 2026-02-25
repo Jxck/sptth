@@ -57,6 +57,38 @@ Set DNS manually to `127.0.0.1` in `Settings > Network`, or configure `/etc/reso
 
 See `docs/release.md` for release and artifact verification policy.
 
+### Verify Release Artifacts
+
+After downloading release files, verify them before execution.
+
+```sh
+VERSION=v0.0.2
+FILE=sptth-${VERSION}-aarch64-apple-darwin.tar.gz
+```
+
+1. Verify checksum:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+2. Verify keyless signature:
+
+```sh
+cosign verify-blob \
+  --certificate "${FILE}.crt" \
+  --signature "${FILE}.sig" \
+  --certificate-identity-regexp "https://github.com/jxck/sptth/.github/workflows/release.yml@refs/tags/${VERSION}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "${FILE}"
+```
+
+3. Verify provenance attestation:
+
+```sh
+gh attestation verify "${FILE}" --repo jxck/sptth
+```
+
 ## Development Setup
 
 After cloning, run setup once to install local development tools into `.tools/`.
