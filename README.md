@@ -327,4 +327,4 @@ curl https://example.com/
 
 ## ACK
 
-All source code was written in Rust by Codex.
+All source code was written in Rust by Codex & Claude.
