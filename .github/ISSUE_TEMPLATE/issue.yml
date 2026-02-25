@@ -1,0 +1,95 @@
+name: Issue
+description: Report a bug, propose an improvement, or ask for a change.
+title: "[Issue] "
+labels:
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We currently do not accept pull requests for implementation changes.
+        If you want to propose an implementation, please provide a high-quality AI prompt in the field below.
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Bug
+        - Improvement
+        - Question
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      placeholder: Describe the issue or proposal.
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Include steps, expected behavior, and actual behavior as needed.
+      placeholder: |
+        Steps:
+        1. ...
+
+        Expected:
+        ...
+
+        Actual:
+        ...
+    validations:
+      required: true
+  - type: textarea
+    id: suggested_ai_prompt
+    attributes:
+      label: Suggested AI Prompt (implementation plan)
+      description: |
+        Optional. If you want this implemented, provide the exact prompt you would give to an AI coding agent.
+        Include scope, constraints, acceptance criteria, and files likely to change.
+      placeholder: |
+        Goal:
+        - ...
+
+        Scope:
+        - ...
+
+        Constraints:
+        - ...
+
+        Acceptance criteria:
+        - ...
+      render: markdown
+    validations:
+      required: false
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config.toml (optional)
+      description: Paste a minimal reproducible config. Mask sensitive values.
+      render: toml
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / errors (optional)
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: sptth version
+      placeholder: v0.0.2 / commit hash / cargo run
+    validations:
+      required: false
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: macOS / Linux / Windows
+    validations:
+      required: false
