@@ -32,6 +32,7 @@ Project-wide guidance for AI coding agents and contributors.
 ## Commit Message Policy
 
 - Follow `/Users/jxck/develop/sptth/docs/commit-message.md`.
+- All commit message content must be written in English.
 - Required structure:
   1. short subject
   2. 3-bullet compressed summary
