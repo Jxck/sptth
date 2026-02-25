@@ -80,7 +80,7 @@ See `docs/release.md` for release and artifact verification policy.
 After downloading release files, verify them before execution.
 
 ```sh
-VERSION=v0.0.3
+VERSION=v0.1.0
 FILE=sptth-${VERSION}-aarch64-apple-darwin.tar.gz
 ```
 
