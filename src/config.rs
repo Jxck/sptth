@@ -325,35 +325,38 @@ fn validate_upstream_host_port(input: &str) -> Result<()> {
     Ok(())
 }
 
-fn default_state_base_dir() -> PathBuf {
-    // When run with sudo, we still want state files to belong to the invoking user
-    // rather than root's HOME to keep behavior predictable across restarts.
+/// Resolve the invoking user's home directory, preferring SUDO_USER's home when
+/// running under sudo so that paths stay consistent regardless of privilege.
+fn resolve_home() -> Option<PathBuf> {
     if let Ok(sudo_user) = std::env::var("SUDO_USER") {
         if !sudo_user.trim().is_empty() && sudo_user != "root" {
             if let Ok(Some(home)) = homedir::home(&sudo_user) {
-                return home.join(".config").join("sptth");
+                return Some(home);
             }
         }
     }
 
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.trim().is_empty() {
-            return PathBuf::from(home).join(".config").join("sptth");
-        }
-    }
+    std::env::var("HOME")
+        .ok()
+        .filter(|h| !h.trim().is_empty())
+        .map(PathBuf::from)
+}
 
-    PathBuf::from(".sptth")
+fn default_state_base_dir() -> PathBuf {
+    resolve_home()
+        .map(|h| h.join(".config").join("sptth"))
+        .unwrap_or_else(|| PathBuf::from(".sptth"))
 }
 
 fn expand_tilde(input: &str) -> PathBuf {
     if input == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home);
+        if let Some(home) = resolve_home() {
+            return home;
         }
     }
     if let Some(suffix) = input.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(suffix);
+        if let Some(home) = resolve_home() {
+            return home.join(suffix);
         }
     }
     PathBuf::from(input)

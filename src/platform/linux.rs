@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -66,12 +66,12 @@ fn install_with_update_ca_trust(ca_cert_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Search PATH for an executable without invoking a shell, so the name is
+/// never interpreted as a shell meta-character sequence.
 fn has_command(name: &str) -> bool {
-    // Keep detection lightweight and avoid introducing extra dependencies.
-    Command::new("sh")
-        .arg("-c")
-        .arg(format!("command -v {} >/dev/null 2>&1", name))
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    let path_var = env::var_os("PATH").unwrap_or_default();
+    env::split_paths(&path_var).any(|dir| {
+        let candidate = dir.join(name);
+        candidate.is_file()
+    })
 }

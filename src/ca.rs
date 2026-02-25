@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     fs,
+    io::Write,
     path::{Path, PathBuf},
     time::{Duration as StdDuration, SystemTime},
 };
@@ -100,7 +101,7 @@ fn load_or_create_ca(tls: &TlsConfig) -> Result<CaSigner> {
         (key, !cert_exists)
     } else {
         let key = KeyPair::generate().context("failed to generate CA key")?;
-        fs::write(&ca_key_path, key.serialize_pem())
+        write_private_key(&ca_key_path, &key.serialize_pem())
             .with_context(|| format!("failed to write CA key: {}", ca_key_path.display()))?;
         (key, true)
     };
@@ -173,9 +174,30 @@ fn issue_domain_cert(
 
     fs::write(cert_path, cert.pem())
         .with_context(|| format!("failed to write certificate: {}", cert_path.display()))?;
-    fs::write(key_path, leaf_key.serialize_pem())
-        .with_context(|| format!("failed to write key: {}", key_path.display()))?;
+    write_private_key(key_path, &leaf_key.serialize_pem())?;
 
+    Ok(())
+}
+
+/// Write private key PEM with owner-only permissions (0600 on Unix).
+fn write_private_key(path: &Path, pem: &str) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .with_context(|| format!("failed to create key file: {}", path.display()))?;
+        file.write_all(pem.as_bytes())
+            .with_context(|| format!("failed to write key: {}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, pem).with_context(|| format!("failed to write key: {}", path.display()))?;
+    }
     Ok(())
 }
 
@@ -210,7 +232,7 @@ fn should_reissue(cert_path: &Path, valid_days: u32, renew_before_days: u32) -> 
 mod tests {
     use std::fs;
 
-    use super::should_reissue;
+    use super::{should_reissue, write_private_key};
 
     #[test]
     fn reissue_when_file_missing() {
@@ -237,5 +259,16 @@ mod tests {
 
         // renew_before_days == valid_days → renew_after_days == 0 → always reissue
         assert!(should_reissue(&path, 90, 90));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_key_has_mode_600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("test.key");
+        write_private_key(&key_path, "fake-pem-data").unwrap();
+        let mode = fs::metadata(&key_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 }

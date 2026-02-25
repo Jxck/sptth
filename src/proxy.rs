@@ -18,6 +18,9 @@ use tower::ServiceExt;
 
 use crate::{config::ProxyConfig, logging};
 
+/// Cap request bodies to prevent memory exhaustion from oversized uploads.
+const MAX_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+
 #[derive(Clone)]
 struct ProxyRoute {
     domain: String,
@@ -172,9 +175,22 @@ async fn forward(
     let (parts, body) = req.into_parts();
     let target = build_target_url(base_url, &parts.uri);
 
-    let body_bytes = to_bytes(body, usize::MAX)
-        .await
-        .context("failed to read request body")?;
+    let body_bytes = match to_bytes(body, MAX_REQUEST_BODY_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            logging::error(
+                "PROXY",
+                &format!(
+                    "request body exceeds {} bytes limit",
+                    MAX_REQUEST_BODY_BYTES
+                ),
+            );
+            return Ok(Response::builder()
+                .status(StatusCode::PAYLOAD_TOO_LARGE)
+                .body(Body::from("request body too large"))
+                .expect("static response must build"));
+        }
+    };
 
     let mut upstream_req = client
         .request(parts.method.clone(), target)
@@ -253,9 +269,12 @@ fn is_hop_by_hop(name: &HeaderName) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::{HeaderName, Uri};
+    use axum::{
+        body::{Body, to_bytes},
+        http::{HeaderName, Uri},
+    };
 
-    use super::{build_target_url, is_hop_by_hop, normalize_host};
+    use super::{MAX_REQUEST_BODY_BYTES, build_target_url, is_hop_by_hop, normalize_host};
 
     #[test]
     fn normalize_host_removes_port() {
@@ -292,5 +311,22 @@ mod tests {
         assert!(is_hop_by_hop(&HeaderName::from_static("keep-alive")));
         assert!(!is_hop_by_hop(&HeaderName::from_static("content-type")));
         assert!(!is_hop_by_hop(&HeaderName::from_static("host")));
+    }
+
+    #[tokio::test]
+    async fn small_body_within_limit() {
+        let small = vec![0u8; 1024];
+        let body = Body::from(small);
+        let result = to_bytes(body, MAX_REQUEST_BODY_BYTES).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 1024);
+    }
+
+    #[tokio::test]
+    async fn body_exceeding_limit_is_rejected() {
+        let oversized = vec![0u8; MAX_REQUEST_BODY_BYTES + 1];
+        let body = Body::from(oversized);
+        let result = to_bytes(body, MAX_REQUEST_BODY_BYTES).await;
+        assert!(result.is_err());
     }
 }

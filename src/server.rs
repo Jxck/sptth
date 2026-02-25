@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result, bail};
-use tokio::{net::UdpSocket, signal, task};
+use tokio::{net::UdpSocket, signal, sync::Semaphore, task};
 
 use crate::{
     ca,
@@ -41,6 +41,10 @@ pub async fn run(config: AppConfig) -> Result<()> {
     }
 }
 
+/// Cap concurrent DNS handler tasks to prevent unbounded resource consumption
+/// from UDP packet floods.
+const MAX_CONCURRENT_DNS_REQUESTS: usize = 256;
+
 async fn run_dns(config: DnsConfig, records: HashMap<String, DomainAddrs>) -> Result<()> {
     let socket = Arc::new(
         UdpSocket::bind(config.listen)
@@ -50,6 +54,7 @@ async fn run_dns(config: DnsConfig, records: HashMap<String, DomainAddrs>) -> Re
     let records = Arc::new(records);
     let upstream = Arc::new(config.upstream);
     let ttl = config.ttl_seconds;
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DNS_REQUESTS));
 
     logging::info("DNS", &format!("dns server listening on {}", config.listen));
 
@@ -62,12 +67,28 @@ async fn run_dns(config: DnsConfig, records: HashMap<String, DomainAddrs>) -> Re
         let req_packet = buf[..size].to_vec();
         logging::debug("DNS", &format!("recv {} bytes from {}", size, peer));
 
+        let permit = match semaphore.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                logging::error(
+                    "DNS",
+                    &format!(
+                        "dropping request from {}: too many concurrent requests",
+                        peer
+                    ),
+                );
+                continue;
+            }
+        };
+
         let socket = Arc::clone(&socket);
         let records = Arc::clone(&records);
         let upstream = Arc::clone(&upstream);
 
         // Each request is handled in its own task to keep UDP receive loop responsive.
+        // The semaphore permit is moved into the task and released when it completes.
         task::spawn(async move {
+            let _permit = permit;
             match dns::handle_dns_packet(
                 &req_packet,
                 peer,

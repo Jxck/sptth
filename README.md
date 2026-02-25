@@ -26,6 +26,15 @@ You can start all of them with one `sudo` command and test locally in conditions
 > It changes some of your local settings.
 > Use it at your own risk.
 
+## Security Notes
+
+`sptth` is designed for **local development only** and should not be exposed to untrusted networks.
+
+- The reverse proxy enforces a **10 MiB request body limit** to prevent memory exhaustion.
+- DNS forwarding **validates the source address** of upstream responses to reject spoofed packets.
+- Private key files (CA and leaf) are created with **mode 0600** (owner-only read/write) on Unix.
+- Concurrent DNS handler tasks are capped at **256** to limit resource consumption under load.
+
 ## Quick Start
 
 Change your OS DNS server to `127.0.0.1`.

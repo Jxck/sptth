@@ -113,6 +113,11 @@ fn local_response(
     resp.to_vec().context("failed to encode dns response")
 }
 
+/// Check whether the response source exactly matches the expected upstream server.
+fn is_valid_source(from: SocketAddr, expected: SocketAddr) -> bool {
+    from == expected
+}
+
 async fn forward_dns_packet(
     packet: &[u8],
     query_id: u16,
@@ -140,40 +145,99 @@ async fn forward_dns_packet(
             .with_context(|| format!("failed to forward dns query to {server}"))?;
 
         let mut buf = vec![0_u8; 4096];
-        let recv = tokio::time::timeout(
-            tokio::time::Duration::from_secs(2),
-            resolver.recv_from(&mut buf),
-        )
-        .await;
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(2);
 
-        match recv {
-            Ok(Ok((n, from))) => {
-                logging::debug(
-                    "DNS",
-                    &format!(
-                        "forward success id={} upstream={} bytes={}",
-                        query_id, from, n
-                    ),
-                );
-                return Ok(buf[..n].to_vec());
-            }
-            Ok(Err(err)) => {
-                logging::error(
-                    "DNS",
-                    &format!(
-                        "forward recv error id={} upstream={} err={}",
-                        query_id, server, err
-                    ),
-                );
-            }
-            Err(_) => {
+        // Loop within the timeout window to discard spoofed packets from
+        // unexpected sources and accept only the real upstream response.
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
                 logging::error(
                     "DNS",
                     &format!("forward timeout id={} upstream={}", query_id, server),
                 );
+                break;
+            }
+
+            let recv = tokio::time::timeout(remaining, resolver.recv_from(&mut buf)).await;
+
+            match recv {
+                Ok(Ok((n, from))) => {
+                    if is_valid_source(from, *server) {
+                        logging::debug(
+                            "DNS",
+                            &format!(
+                                "forward success id={} upstream={} bytes={}",
+                                query_id, from, n
+                            ),
+                        );
+                        return Ok(buf[..n].to_vec());
+                    }
+                    // Discard packets from unexpected sources to prevent
+                    // DNS spoofing via forged response injection.
+                    logging::debug(
+                        "DNS",
+                        &format!(
+                            "forward ignored id={} from={} expected={}",
+                            query_id, from, server
+                        ),
+                    );
+                }
+                Ok(Err(err)) => {
+                    logging::error(
+                        "DNS",
+                        &format!(
+                            "forward recv error id={} upstream={} err={}",
+                            query_id, server, err
+                        ),
+                    );
+                    break;
+                }
+                Err(_) => {
+                    logging::error(
+                        "DNS",
+                        &format!("forward timeout id={} upstream={}", query_id, server),
+                    );
+                    break;
+                }
             }
         }
     }
 
     bail!("all upstream dns servers failed")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::SocketAddr;
+
+    use super::is_valid_source;
+
+    #[test]
+    fn valid_source_same_ip_and_port() {
+        let server: SocketAddr = "1.1.1.1:53".parse().unwrap();
+        let from: SocketAddr = "1.1.1.1:53".parse().unwrap();
+        assert!(is_valid_source(from, server));
+    }
+
+    #[test]
+    fn invalid_source_different_port() {
+        let server: SocketAddr = "1.1.1.1:53".parse().unwrap();
+        let from: SocketAddr = "1.1.1.1:5353".parse().unwrap();
+        assert!(!is_valid_source(from, server));
+    }
+
+    #[test]
+    fn invalid_source_different_ip() {
+        let server: SocketAddr = "1.1.1.1:53".parse().unwrap();
+        let from: SocketAddr = "9.9.9.9:53".parse().unwrap();
+        assert!(!is_valid_source(from, server));
+    }
+
+    #[test]
+    fn valid_source_ipv6() {
+        let server: SocketAddr = "[2606:4700::1111]:53".parse().unwrap();
+        let from: SocketAddr = "[2606:4700::1111]:53".parse().unwrap();
+        assert!(is_valid_source(from, server));
+    }
 }
